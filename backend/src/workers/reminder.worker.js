@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import connection from "../config/redis.js";
 import Reminder from "../models/reminder.model.js";
+import { createReminder } from "../services/reminder.service.js";
 
 const worker = new Worker(
   "reminders",
@@ -17,6 +18,30 @@ const worker = new Worker(
     reminder.status = "sent";
 
     await reminder.save();
+
+    if (reminder.isRecurring) {
+      const nextDate = new Date(reminder.reminderTime);
+
+      if (reminder.recurrencePattern === "daily") {
+        nextDate.setDate(nextDate.getDate() + 1);
+      }
+
+      if (reminder.recurrencePattern === "weekly") {
+        nextDate.setDate(nextDate.getDate() + 7);
+      }
+
+      if (reminder.recurrencePattern === "monthly") {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      }
+
+      await createReminder({
+        phoneNumber: reminder.phoneNumber,
+        task: reminder.task,
+        reminderTime: nextDate,
+        isRecurring: true,
+        recurrencePattern: reminder.recurrencePattern,
+      });
+    }
   },
   {
     connection,

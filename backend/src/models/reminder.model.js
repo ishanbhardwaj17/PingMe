@@ -17,6 +17,17 @@ const reminderSchema = new mongoose.Schema(
       required: true,
     },
 
+    isRecurring: {
+      type: Boolean,
+      default: false,
+    },
+
+    recurrencePattern: {
+      type: String,
+      enum: ["daily", "weekly", "monthly", null],
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["pending", "sent", "completed", "cancelled"],

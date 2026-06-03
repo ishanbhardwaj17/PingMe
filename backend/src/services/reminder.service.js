@@ -1,6 +1,7 @@
 import Reminder from "../models/reminder.model.js";
 import reminderQueue from "../queues/reminder.queue.js";
 import { parseReminderText } from "../utils/parser.js";
+import { detectRecurrence } from "../utils/recurrenceParser.js";
 
 
 export const createReminder = async (data) => {
@@ -42,10 +43,14 @@ export const createReminderFromText = async ({
   text,
 }) => {
   const parsed = parseReminderText(text);
+    const recurrencePattern = detectRecurrence(text);
+    const isRecurring = recurrencePattern !== null;
 
   return await createReminder({
     phoneNumber,
     task: parsed.task,
     reminderTime: parsed.reminderTime,
+        isRecurring,
+        recurrencePattern,
   });
 };

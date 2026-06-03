@@ -7,6 +7,7 @@ import {
     createReminderFromText
 } from "../controllers/reminder.controller.js";
 import { parseReminderText } from "../utils/parser.js";
+import { detectRecurrence } from "../utils/recurrenceParser.js";
 
 const router = express.Router();
 
@@ -34,5 +35,17 @@ router.post(
     "/create-from-text",
     createReminderFromText
 );
+
+router.post("/test-recurrence", (req, res) => {
+  const { text } = req.body;
+
+  const recurrencePattern =
+    detectRecurrence(text);
+
+  res.json({
+    recurrencePattern,
+    isRecurring: recurrencePattern !== null,
+  });
+});
 
 export default router;
