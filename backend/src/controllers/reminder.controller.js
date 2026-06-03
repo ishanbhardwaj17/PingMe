@@ -47,3 +47,20 @@ export const deleteReminder = async (req, res) => {
         });
     }
 };
+
+export const createReminderFromText = async (req, res) => {
+    try {
+        const reminder =
+            await reminderService.createReminderFromText(req.body);
+
+        res.status(201).json({
+            success: true,
+            reminder,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};

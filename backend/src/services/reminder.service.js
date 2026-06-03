@@ -1,5 +1,7 @@
 import Reminder from "../models/reminder.model.js";
 import reminderQueue from "../queues/reminder.queue.js";
+import { parseReminderText } from "../utils/parser.js";
+
 
 export const createReminder = async (data) => {
     const reminder = await Reminder.create(data);
@@ -33,4 +35,17 @@ export const getReminderById = async (id) => {
 
 export const deleteReminder = async (id) => {
     return await Reminder.findByIdAndDelete(id);
+};
+
+export const createReminderFromText = async ({
+  phoneNumber,
+  text,
+}) => {
+  const parsed = parseReminderText(text);
+
+  return await createReminder({
+    phoneNumber,
+    task: parsed.task,
+    reminderTime: parsed.reminderTime,
+  });
 };
