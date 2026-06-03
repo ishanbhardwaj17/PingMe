@@ -19,7 +19,7 @@ const reminderSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "completed", "cancelled"],
+      enum: ["pending", "sent", "completed", "cancelled"],
       default: "pending",
     },
   },
