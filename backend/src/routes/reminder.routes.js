@@ -8,7 +8,7 @@ import {
 } from "../controllers/reminder.controller.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
-
+import { generateDigest } from "../services/digest.service.js";
 const router = express.Router();
 
 router.post("/", createReminder);
@@ -16,6 +16,14 @@ router.post("/", createReminder);
 router.get("/", getAllReminders);
 
 router.delete("/:id", deleteReminder);
+
+router.get("/digest", async (req, res) => {
+  const digest = await generateDigest();
+
+  res.json({
+    digest,
+  });
+});
 
 router.post("/parse", (req, res) => {
     try {
