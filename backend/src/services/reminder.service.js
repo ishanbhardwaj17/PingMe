@@ -39,6 +39,7 @@ export const deleteReminder = async (id) => {
 };
 
 export const createReminderFromText = async ({
+    userId,
   phoneNumber,
   text,
 }) => {
@@ -47,6 +48,7 @@ export const createReminderFromText = async ({
     const isRecurring = recurrencePattern !== null;
 
   return await createReminder({
+        userId,
     phoneNumber,
     task: parsed.task,
     reminderTime: parsed.reminderTime,

@@ -1,6 +1,6 @@
 import Reminder from "../models/reminder.model.js";
 
-export const getTodaysReminders = async () => {
+export const getTodaysReminders = async (userId) => {
     const start = new Date();
 
     start.setHours(0, 0, 0, 0);
@@ -10,6 +10,7 @@ export const getTodaysReminders = async () => {
     end.setHours(23, 59, 59, 999);
 
     return await Reminder.find({
+        userId,
         reminderTime: {
             $gte: start,
             $lte: end,
@@ -20,8 +21,8 @@ export const getTodaysReminders = async () => {
     });
 };
 
-export const generateDigest = async () => {
-    const reminders = await getTodaysReminders();
+export const generateDigest = async (userId) => {
+    const reminders = await getTodaysReminders(userId);
 
     if (!reminders.length) {
         return "No reminders for today 🎉";

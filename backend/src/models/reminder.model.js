@@ -33,6 +33,11 @@ const reminderSchema = new mongoose.Schema(
       enum: ["pending", "sent", "completed", "cancelled"],
       default: "pending",
     },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   {
     timestamps: true,

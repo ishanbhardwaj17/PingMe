@@ -6,6 +6,7 @@ import {
     deleteReminder,
     createReminderFromText
 } from "../controllers/reminder.controller.js";
+import User from "../models/user.model.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
 import { generateDigest } from "../services/digest.service.js";
@@ -17,12 +18,28 @@ router.get("/", getAllReminders);
 
 router.delete("/:id", deleteReminder);
 
-router.get("/digest", async (req, res) => {
-  const digest = await generateDigest();
+router.get("/digest/:phoneNumber", async (req, res) => {
+  try {
+    const user = await User.findOne({
+      phoneNumber: req.params.phoneNumber,
+    });
 
-  res.json({
-    digest,
-  });
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const digest = await generateDigest(user._id);
+
+    res.json({
+      digest,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
 });
 
 router.post("/parse", (req, res) => {

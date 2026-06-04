@@ -1,4 +1,5 @@
 import * as reminderService from "../services/reminder.service.js";
+import { findOrCreateUser } from "../services/user.service.js";
 
 export const createReminder = async (req, res) => {
     try {
@@ -50,8 +51,15 @@ export const deleteReminder = async (req, res) => {
 
 export const createReminderFromText = async (req, res) => {
     try {
-        const reminder =
-            await reminderService.createReminderFromText(req.body);
+        const { phoneNumber, text } = req.body;
+
+        const user = await findOrCreateUser(phoneNumber);
+
+        const reminder = await reminderService.createReminderFromText({
+            userId: user._id,
+            phoneNumber,
+            text,
+        });
 
         res.status(201).json({
             success: true,
