@@ -10,11 +10,82 @@ import User from "../models/user.model.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
 import { generateDigest } from "../services/digest.service.js";
+import {
+  getReminderStats,
+  getUpcomingReminders,
+  getUserReminders,
+} from "../services/reminder.service.js";
 const router = express.Router();
 
 router.post("/", createReminder);
 
 router.get("/", getAllReminders);
+
+router.get("/user/:phoneNumber", async (req, res) => {
+  try {
+    const user = await User.findOne({
+      phoneNumber: req.params.phoneNumber,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const reminders = await getUserReminders(user._id);
+
+    res.json(reminders);
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+});
+
+router.get("/upcoming/:phoneNumber", async (req, res) => {
+  try {
+    const user = await User.findOne({
+      phoneNumber: req.params.phoneNumber,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const reminders = await getUpcomingReminders(user._id);
+
+    res.json(reminders);
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+});
+
+router.get("/stats/:phoneNumber", async (req, res) => {
+  try {
+    const user = await User.findOne({
+      phoneNumber: req.params.phoneNumber,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const stats = await getReminderStats(user._id);
+
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+});
 
 router.delete("/:id", deleteReminder);
 

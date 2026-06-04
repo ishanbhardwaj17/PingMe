@@ -30,6 +30,52 @@ export const getAllReminders = async () => {
     return await Reminder.find().sort({ reminderTime: 1 });
 };
 
+export const getUserReminders = async (userId) => {
+    return await Reminder.find({
+        userId,
+    })
+        .sort({
+            reminderTime: 1,
+        })
+        .select("task status -_id")
+        .lean();
+};
+
+export const getUpcomingReminders = async (userId) => {
+    const now = new Date();
+
+    return await Reminder.find({
+        userId,
+        reminderTime: {
+            $gt: now,
+        },
+    })
+        .sort({
+            reminderTime: 1,
+        })
+        .lean();
+};
+
+export const getReminderStats = async (userId) => {
+    const [total, pending, completed] = await Promise.all([
+        Reminder.countDocuments({ userId }),
+        Reminder.countDocuments({
+            userId,
+            status: "pending",
+        }),
+        Reminder.countDocuments({
+            userId,
+            status: "completed",
+        }),
+    ]);
+
+    return {
+        total,
+        pending,
+        completed,
+    };
+};
+
 export const getReminderById = async (id) => {
     return await Reminder.findById(id);
 };
