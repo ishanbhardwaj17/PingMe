@@ -22,7 +22,11 @@ export const sendWhatsAppMessage = async (to, message) => {
 
     return response.data;
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    if (error.response?.data) {
+      console.error("WhatsApp API Error:", JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error("WhatsApp Error:", error.message);
+    }
     throw error;
   }
 };
