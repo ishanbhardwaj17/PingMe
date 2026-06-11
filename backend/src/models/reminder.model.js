@@ -30,9 +30,10 @@ const reminderSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "sent", "completed", "cancelled"],
+      enum: ["pending", "sent", "failed", "cancelled"],
       default: "pending",
     },
+
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -41,7 +42,7 @@ const reminderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const Reminder = mongoose.model("Reminder", reminderSchema);
