@@ -3,6 +3,7 @@ import cors from "cors";
 import reminderRoutes from "./routes/reminder.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import whatsappRoutes from "./routes/whatsapp.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/webhook", webhookRoutes);
 
 app.get("/", (req, res) => {
   res.send("PingMe API Running 🚀");
