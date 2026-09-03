@@ -24,7 +24,26 @@ const reminderSchema = new mongoose.Schema(
 
     recurrencePattern: {
       type: String,
-      enum: ["daily", "weekly", "monthly", null],
+      enum: [
+        "daily",
+        "weekly",
+        "monthly",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        null,
+      ],
+      default: null,
+    },
+
+    recurrenceAnchorDay: {
+      type: Number,
+      min: 1,
+      max: 31,
       default: null,
     },
 

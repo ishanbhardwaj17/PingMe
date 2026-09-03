@@ -3,6 +3,7 @@ import connection from "../config/redis.js";
 import Reminder from "../models/reminder.model.js";
 import { createReminder } from "../services/reminder.service.js";
 import { sendReminder } from "../services/reminder-delivery.service.js";
+import { nextOccurrence } from "../utils/recurrenceParser.js";
 
 const worker = new Worker(
   "reminders",
@@ -35,19 +36,11 @@ const worker = new Worker(
     }
 
     if (reminder.isRecurring) {
-      const nextDate = new Date(reminder.reminderTime);
-
-      if (reminder.recurrencePattern === "daily") {
-        nextDate.setDate(nextDate.getDate() + 1);
-      }
-
-      if (reminder.recurrencePattern === "weekly") {
-        nextDate.setDate(nextDate.getDate() + 7);
-      }
-
-      if (reminder.recurrencePattern === "monthly") {
-        nextDate.setMonth(nextDate.getMonth() + 1);
-      }
+      const nextDate = nextOccurrence(
+        reminder.reminderTime,
+        reminder.recurrencePattern,
+        reminder.recurrenceAnchorDay,
+      );
 
       await createReminder({
         phoneNumber: reminder.phoneNumber,
@@ -55,6 +48,7 @@ const worker = new Worker(
         reminderTime: nextDate,
         isRecurring: true,
         recurrencePattern: reminder.recurrencePattern,
+        recurrenceAnchorDay: reminder.recurrenceAnchorDay,
         userId: reminder.userId,
       });
 

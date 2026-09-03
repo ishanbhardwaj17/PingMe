@@ -10,6 +10,13 @@ export const createReminder = async (req, res) => {
             reminder,
         });
     } catch (error) {
+        if (error instanceof reminderService.ValidationError) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: error.message,
@@ -66,6 +73,13 @@ export const createReminderFromText = async (req, res) => {
             reminder,
         });
     } catch (error) {
+        if (error instanceof reminderService.ValidationError) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: error.message,

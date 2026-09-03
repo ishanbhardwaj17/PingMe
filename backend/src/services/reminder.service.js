@@ -1,13 +1,53 @@
 import Reminder from "../models/reminder.model.js";
 import reminderQueue from "../queues/reminder.queue.js";
 import { parseReminderText } from "../utils/parser.js";
-import { detectRecurrence } from "../utils/recurrenceParser.js";
+import {
+  detectRecurrence,
+  resolveFutureOccurrence,
+} from "../utils/recurrenceParser.js";
 
+
+export class ValidationError extends Error {}
 
 export const createReminder = async (data) => {
-    const reminder = await Reminder.create(data);
+    const {
+        reminderTime,
+        isRecurring = false,
+        recurrencePattern = null,
+        recurrenceAnchorDay = null,
+    } = data;
 
-    const delay = new Date(reminder.reminderTime).getTime() - Date.now();
+    const requestedTime = new Date(reminderTime);
+
+    let effectiveTime;
+    let anchorDay = null;
+
+    if (isRecurring) {
+        if (recurrencePattern === "monthly") {
+            anchorDay = recurrenceAnchorDay ?? requestedTime.getDate();
+        }
+
+        effectiveTime = resolveFutureOccurrence(
+            requestedTime,
+            recurrencePattern,
+            new Date(),
+            anchorDay
+        );
+    } else if (requestedTime.getTime() <= Date.now()) {
+        throw new ValidationError(
+            "Reminder time is in the past. Please provide a future time."
+        );
+    } else {
+        effectiveTime = requestedTime;
+    }
+
+    const reminder = await Reminder.create({
+        ...data,
+        reminderTime: effectiveTime,
+        recurrenceAnchorDay: anchorDay,
+    });
+
+    const delay = effectiveTime.getTime() - Date.now();
 
     if (delay > 0) {
         await reminderQueue.add(
