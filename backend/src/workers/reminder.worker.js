@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 import connection from "../config/redis.js";
 import Reminder from "../models/reminder.model.js";
 import { createReminder } from "../services/reminder.service.js";
-import { sendReminder } from "../services/reminder-delivery.service.js";
+import { deliverReminder } from "../services/reminder-delivery.service.js";
 import { nextOccurrence } from "../utils/recurrenceParser.js";
 
 const worker = new Worker(
@@ -19,21 +19,9 @@ const worker = new Worker(
 
     if (!reminder) return;
 
-    try {
-      await sendReminder(reminder);
+    await deliverReminder(reminder, job);
 
-      reminder.status = "sent";
-      await reminder.save();
-
-      console.log(`Reminder sent: ${reminder.task}`);
-    } catch (error) {
-      reminder.status = "failed";
-      await reminder.save();
-
-      console.error("Failed to send reminder:", error.message);
-
-      throw error;
-    }
+    console.log(`Reminder sent: ${reminder.task}`);
 
     if (reminder.isRecurring) {
       const nextDate = nextOccurrence(

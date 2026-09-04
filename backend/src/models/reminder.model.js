@@ -53,6 +53,27 @@ const reminderSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    deliveryAttempts: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+
+    deliveredAt: {
+      type: Date,
+      default: null,
+    },
+
+    deliveredMessageId: {
+      type: String,
+      default: null,
+    },
+
+    lastError: {
+      type: String,
+      default: null,
+    },
+
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

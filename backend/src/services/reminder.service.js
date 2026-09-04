@@ -70,6 +70,11 @@ export const createReminder = async (data) => {
             {
                 jobId: reminder._id.toString(),
                 delay,
+                attempts: 3,
+                backoff: {
+                    type: "exponential",
+                    delay: 5000,
+                },
             }
         );
     }
