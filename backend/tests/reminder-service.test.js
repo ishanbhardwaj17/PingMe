@@ -130,3 +130,114 @@ describe("createReminder scheduling", () => {
     }
   });
 });
+
+describe("BullMQ job identity", () => {
+  const findJobFor = async (reminderId) => {
+    const delayed = await reminderQueue.getDelayed();
+
+    return delayed.find((j) => j.data.reminderId === reminderId.toString());
+  };
+
+  it("uses the Reminder _id as the BullMQ jobId", async () => {
+    const reminder = await createReminder({
+      phoneNumber: "+910000000000",
+      task: "job identity one",
+      reminderTime: new Date(Date.now() + 2 * 60_000),
+      userId: TEST_USER_ID,
+    });
+
+    try {
+      const job = await findJobFor(reminder._id);
+
+      assert.ok(job, "a delayed job should exist for the reminder");
+      assert.equal(job.id, reminder._id.toString());
+
+      const stored = await reminderQueue.getJob(job.id);
+
+      assert.equal(stored.id, reminder._id.toString());
+      assert.equal(stored.data.reminderId, reminder._id.toString());
+      assert.ok(stored.delay > 0, "scheduling behavior is preserved");
+    } finally {
+      const job = await findJobFor(reminder._id);
+
+      await cleanup(reminder._id, job?.id);
+    }
+  });
+
+  it("does not create a second stored job when the same jobId is added twice", async () => {
+    const reminder = await createReminder({
+      phoneNumber: "+910000000000",
+      task: "job identity duplicate",
+      reminderTime: new Date(Date.now() + 2 * 60_000),
+      userId: TEST_USER_ID,
+    });
+
+    try {
+      const jobId = reminder._id.toString();
+
+      const first = await findJobFor(reminder._id);
+
+      assert.equal(first.id, jobId);
+
+      await reminderQueue.add(
+        "send-reminder",
+        {
+          reminderId: jobId,
+          task: reminder.task,
+          phoneNumber: reminder.phoneNumber,
+        },
+        { jobId, delay: 5 * 60_000 },
+      );
+
+      const delayed = await reminderQueue.getDelayed();
+
+      const matches = delayed.filter((j) => j.id === jobId);
+
+      assert.equal(matches.length, 1, "only one stored job for the jobId");
+
+      const stored = await reminderQueue.getJob(jobId);
+
+      assert.ok(
+        stored.delay > 60_000 && stored.delay <= 120_000,
+        "stored job keeps its original delay and is not replaced",
+      );
+    } finally {
+      const job = await findJobFor(reminder._id);
+
+      await cleanup(reminder._id, job?.id);
+    }
+  });
+
+  it("assigns distinct jobIds to distinct reminders", async () => {
+    const reminderA = await createReminder({
+      phoneNumber: "+910000000000",
+      task: "job identity distinct a",
+      reminderTime: new Date(Date.now() + 2 * 60_000),
+      userId: TEST_USER_ID,
+    });
+
+    const reminderB = await createReminder({
+      phoneNumber: "+910000000000",
+      task: "job identity distinct b",
+      reminderTime: new Date(Date.now() + 3 * 60_000),
+      userId: TEST_USER_ID,
+    });
+
+    try {
+      const jobA = await findJobFor(reminderA._id);
+      const jobB = await findJobFor(reminderB._id);
+
+      assert.ok(jobA && jobB);
+
+      assert.equal(jobA.id, reminderA._id.toString());
+      assert.equal(jobB.id, reminderB._id.toString());
+      assert.notEqual(jobA.id, jobB.id);
+    } finally {
+      const jobA = await findJobFor(reminderA._id);
+      const jobB = await findJobFor(reminderB._id);
+
+      await cleanup(reminderA._id, jobA?.id);
+      await cleanup(reminderB._id, jobB?.id);
+    }
+  });
+});

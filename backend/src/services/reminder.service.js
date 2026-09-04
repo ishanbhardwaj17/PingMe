@@ -68,6 +68,7 @@ export const createReminder = async (data) => {
                 phoneNumber: reminder.phoneNumber,
             },
             {
+                jobId: reminder._id.toString(),
                 delay,
             }
         );
