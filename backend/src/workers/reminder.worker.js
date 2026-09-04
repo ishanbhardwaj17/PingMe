@@ -1,9 +1,8 @@
 import { Worker } from "bullmq";
 import connection from "../config/redis.js";
 import Reminder from "../models/reminder.model.js";
-import { createReminder } from "../services/reminder.service.js";
+import { advanceRecurrence } from "../services/reminder.service.js";
 import { deliverReminder } from "../services/reminder-delivery.service.js";
-import { nextOccurrence } from "../utils/recurrenceParser.js";
 
 const worker = new Worker(
   "reminders",
@@ -19,29 +18,20 @@ const worker = new Worker(
 
     if (!reminder) return;
 
-    await deliverReminder(reminder, job);
-
-    console.log(`Reminder sent: ${reminder.task}`);
+    if (reminder.deliveredAt) {
+      console.log(
+        `Reminder already delivered (${reminder.deliveredAt.toISOString()}); skipping WhatsApp send.`,
+      );
+    } else {
+      await deliverReminder(reminder, job);
+      console.log(`Reminder sent: ${reminder.task}`);
+    }
 
     if (reminder.isRecurring) {
-      const nextDate = nextOccurrence(
-        reminder.reminderTime,
-        reminder.recurrencePattern,
-        reminder.recurrenceAnchorDay,
-      );
-
-      await createReminder({
-        phoneNumber: reminder.phoneNumber,
-        task: reminder.task,
-        reminderTime: nextDate,
-        isRecurring: true,
-        recurrencePattern: reminder.recurrencePattern,
-        recurrenceAnchorDay: reminder.recurrenceAnchorDay,
-        userId: reminder.userId,
-      });
+      const successor = await advanceRecurrence(reminder);
 
       console.log(
-        `Next recurring reminder scheduled for ${nextDate.toISOString()}`,
+        `Next recurring reminder scheduled for ${successor.reminderTime.toISOString()}`,
       );
     }
   },

@@ -52,7 +52,7 @@ describe("POST /api/reminders", () => {
     const delayed = await reminderQueue.getDelayed();
 
     assert.equal(
-      delayed.some((job) => job.data.task === task),
+      delayed.some((job) => job && job.data && job.data.task === task),
       false,
       "no BullMQ job should exist for the rejected reminder",
     );

@@ -21,7 +21,9 @@ const cleanupFixture = async () => {
 const cleanupReminderJob = async (reminderId) => {
   const delayed = await reminderQueue.getDelayed();
 
-  const job = delayed.find((j) => j.data.reminderId === reminderId.toString());
+  const job = delayed.find(
+      (j) => j && j.data && j.data.reminderId === reminderId.toString(),
+    );
 
   if (job) {
     await reminderQueue.remove(job.id);

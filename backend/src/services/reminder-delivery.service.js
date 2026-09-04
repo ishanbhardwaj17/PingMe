@@ -59,6 +59,15 @@ export const deliverReminder = async (
   job,
   sendFn = sendReminder,
 ) => {
+  // Already-delivered guard: a retried job after the deliveredAt state was
+  // durably persisted must not send another WhatsApp message. Note this
+  // does NOT provide exactly-once delivery for the crash window before
+  // deliveredAt is persisted (Meta may have accepted the message while the
+  // process died before the DB write).
+  if (reminder.deliveredAt) {
+    return { success: true, alreadyDelivered: true };
+  }
+
   await Reminder.updateOne(
     { _id: reminder._id },
     { $inc: { deliveryAttempts: 1 } },

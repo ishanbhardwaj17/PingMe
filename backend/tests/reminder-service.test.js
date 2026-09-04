@@ -47,7 +47,7 @@ describe("createReminder scheduling", () => {
       const delayed = await reminderQueue.getDelayed();
 
       const job = delayed.find(
-        (j) => j.data.reminderId === reminder._id.toString(),
+        (j) => j && j.data && j.data.reminderId === reminder._id.toString(),
       );
 
       assert.ok(job, "a delayed job should exist for the reminder");
@@ -58,7 +58,7 @@ describe("createReminder scheduling", () => {
     } finally {
       const delayed = await reminderQueue.getDelayed();
       const job = delayed.find(
-        (j) => j.data.reminderId === reminder._id.toString(),
+        (j) => j && j.data && j.data.reminderId === reminder._id.toString(),
       );
 
       await cleanup(reminder._id, job?.id);
@@ -84,7 +84,7 @@ describe("createReminder scheduling", () => {
     const delayed = await reminderQueue.getDelayed();
 
     assert.equal(
-      delayed.some((job) => job.data.task === task),
+      delayed.some((job) => job && job.data && job.data.task === task),
       false,
       "no BullMQ job should exist for the rejected reminder",
     );
@@ -116,14 +116,14 @@ describe("createReminder scheduling", () => {
       const delayed = await reminderQueue.getDelayed();
 
       const job = delayed.find(
-        (j) => j.data.reminderId === reminder._id.toString(),
+        (j) => j && j.data && j.data.reminderId === reminder._id.toString(),
       );
 
       assert.ok(job, "a delayed job should exist for the recurring reminder");
     } finally {
       const delayed = await reminderQueue.getDelayed();
       const job = delayed.find(
-        (j) => j.data.reminderId === reminder._id.toString(),
+        (j) => j && j.data && j.data.reminderId === reminder._id.toString(),
       );
 
       await cleanup(reminder._id, job?.id);
@@ -135,7 +135,9 @@ describe("BullMQ job identity", () => {
   const findJobFor = async (reminderId) => {
     const delayed = await reminderQueue.getDelayed();
 
-    return delayed.find((j) => j.data.reminderId === reminderId.toString());
+    return delayed.find(
+      (j) => j && j.data && j.data.reminderId === reminderId.toString(),
+    );
   };
 
   it("uses the Reminder _id as the BullMQ jobId", async () => {
@@ -191,7 +193,7 @@ describe("BullMQ job identity", () => {
 
       const delayed = await reminderQueue.getDelayed();
 
-      const matches = delayed.filter((j) => j.id === jobId);
+      const matches = delayed.filter((j) => j && j.id === jobId);
 
       assert.equal(matches.length, 1, "only one stored job for the jobId");
 

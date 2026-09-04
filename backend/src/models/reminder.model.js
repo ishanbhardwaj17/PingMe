@@ -47,6 +47,23 @@ const reminderSchema = new mongoose.Schema(
       default: null,
     },
 
+    recurrenceAdvancedAt: {
+      type: Date,
+      default: null,
+    },
+
+    recurrenceNextId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Reminder",
+      default: null,
+    },
+
+    recurrenceParentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Reminder",
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["pending", "sent", "failed", "cancelled"],
@@ -82,6 +99,16 @@ const reminderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+  },
+);
+
+reminderSchema.index(
+  { recurrenceParentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      recurrenceParentId: { $type: "objectId" },
+    },
   },
 );
 
