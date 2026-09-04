@@ -26,15 +26,20 @@ export const receiveMessage = async (req, res) => {
     const message = value?.messages?.[0];
 
     if (message && message.text?.body) {
+      const wamid = message.id;
       const phoneNumber = normalizePhoneNumber(message.from);
       const text = message.text.body;
 
-      console.log(`Received message from ${phoneNumber}: "${text}"`);
+      if (!wamid) {
+        console.warn("Received text message without wamid; ignoring.");
+      } else {
+        console.log(`Received message ${wamid} from ${phoneNumber}: "${text}"`);
 
-      // Handle message asynchronously so we can reply with 200 OK immediately (prevent Meta timeouts)
-      handleIncomingMessage(phoneNumber, text).catch((err) => {
-        console.error("Error processing incoming message async:", err.message);
-      });
+        // Handle message asynchronously so we can reply with 200 OK immediately (prevent Meta timeouts)
+        handleIncomingMessage(wamid, phoneNumber, text).catch((err) => {
+          console.error("Error processing incoming message async:", err.message);
+        });
+      }
     }
 
     res.status(200).send("EVENT_RECEIVED");
