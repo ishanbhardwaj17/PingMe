@@ -28,7 +28,6 @@ describe("POST /api/reminders", () => {
 
   it("returns 400 for a past one-shot reminder, persists nothing, and schedules no job", async () => {
     const task = "api past one-shot regression";
-    const delayedBefore = await reminderQueue.getDelayedCount();
 
     const response = await fetch(`${baseUrl}/api/reminders`, {
       method: "POST",
@@ -50,8 +49,12 @@ describe("POST /api/reminders", () => {
 
     assert.equal(await Reminder.countDocuments({ task }), 0);
 
-    const delayedAfter = await reminderQueue.getDelayedCount();
+    const delayed = await reminderQueue.getDelayed();
 
-    assert.equal(delayedAfter, delayedBefore);
+    assert.equal(
+      delayed.some((job) => job.data.task === task),
+      false,
+      "no BullMQ job should exist for the rejected reminder",
+    );
   });
 });

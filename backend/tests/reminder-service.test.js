@@ -69,8 +69,6 @@ describe("createReminder scheduling", () => {
     const task = "test past one-shot";
     const pastTime = new Date(Date.now() - 60_000);
 
-    const delayedBefore = await reminderQueue.getDelayedCount();
-
     await assert.rejects(
       createReminder({
         phoneNumber: "+910000000000",
@@ -83,9 +81,13 @@ describe("createReminder scheduling", () => {
 
     assert.equal(await Reminder.countDocuments({ task }), 0);
 
-    const delayedAfter = await reminderQueue.getDelayedCount();
+    const delayed = await reminderQueue.getDelayed();
 
-    assert.equal(delayedAfter, delayedBefore);
+    assert.equal(
+      delayed.some((job) => job.data.task === task),
+      false,
+      "no BullMQ job should exist for the rejected reminder",
+    );
   });
 
   it("resolves a past recurring reminder to the future and schedules it", async () => {

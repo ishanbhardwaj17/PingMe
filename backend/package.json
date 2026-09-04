@@ -6,7 +6,9 @@
   "activationEvents": [],
   "scripts": {
     "test": "node --test",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "migrate:phones": "node scripts/migrate-phones.js",
+    "migrate:phones:dry-run": "node scripts/migrate-phones.js --dry-run"
   },
   "keywords": [],
   "author": "",

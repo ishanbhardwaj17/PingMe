@@ -1,4 +1,5 @@
 import { handleIncomingMessage } from "../services/incoming-message.service.js";
+import { normalizePhoneNumber } from "../utils/phone.js";
 
 export const verifyWebhook = (req, res) => {
   const mode = req.query["hub.mode"];
@@ -25,7 +26,7 @@ export const receiveMessage = async (req, res) => {
     const message = value?.messages?.[0];
 
     if (message && message.text?.body) {
-      const phoneNumber = message.from;
+      const phoneNumber = normalizePhoneNumber(message.from);
       const text = message.text.body;
 
       console.log(`Received message from ${phoneNumber}: "${text}"`);

@@ -9,6 +9,7 @@ import {
 import User from "../models/user.model.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
+import { normalizePhoneNumber } from "../utils/phone.js";
 import { generateDigest } from "../services/digest.service.js";
 import {
   getReminderStats,
@@ -24,7 +25,7 @@ router.get("/", getAllReminders);
 router.get("/user/:phoneNumber", async (req, res) => {
   try {
     const user = await User.findOne({
-      phoneNumber: req.params.phoneNumber,
+      phoneNumber: normalizePhoneNumber(req.params.phoneNumber),
     });
 
     if (!user) {
@@ -46,7 +47,7 @@ router.get("/user/:phoneNumber", async (req, res) => {
 router.get("/upcoming/:phoneNumber", async (req, res) => {
   try {
     const user = await User.findOne({
-      phoneNumber: req.params.phoneNumber,
+      phoneNumber: normalizePhoneNumber(req.params.phoneNumber),
     });
 
     if (!user) {
@@ -68,7 +69,7 @@ router.get("/upcoming/:phoneNumber", async (req, res) => {
 router.get("/stats/:phoneNumber", async (req, res) => {
   try {
     const user = await User.findOne({
-      phoneNumber: req.params.phoneNumber,
+      phoneNumber: normalizePhoneNumber(req.params.phoneNumber),
     });
 
     if (!user) {
@@ -92,7 +93,7 @@ router.delete("/:id", deleteReminder);
 router.get("/digest/:phoneNumber", async (req, res) => {
   try {
     const user = await User.findOne({
-      phoneNumber: req.params.phoneNumber,
+      phoneNumber: normalizePhoneNumber(req.params.phoneNumber),
     });
 
     if (!user) {

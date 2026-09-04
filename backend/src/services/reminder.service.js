@@ -1,6 +1,7 @@
 import Reminder from "../models/reminder.model.js";
 import reminderQueue from "../queues/reminder.queue.js";
 import { parseReminderText } from "../utils/parser.js";
+import { normalizePhoneNumber } from "../utils/phone.js";
 import {
   detectRecurrence,
   resolveFutureOccurrence,
@@ -10,6 +11,14 @@ import {
 export class ValidationError extends Error {}
 
 export const createReminder = async (data) => {
+    let canonicalPhone;
+
+    try {
+        canonicalPhone = normalizePhoneNumber(data.phoneNumber);
+    } catch (error) {
+        throw new ValidationError(error.message);
+    }
+
     const {
         reminderTime,
         isRecurring = false,
@@ -43,6 +52,7 @@ export const createReminder = async (data) => {
 
     const reminder = await Reminder.create({
         ...data,
+        phoneNumber: canonicalPhone,
         reminderTime: effectiveTime,
         recurrenceAnchorDay: anchorDay,
     });
