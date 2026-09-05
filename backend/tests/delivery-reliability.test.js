@@ -2,7 +2,7 @@ import "dotenv/config";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import Reminder from "../src/models/reminder.model.js";
 import reminderQueue from "../src/queues/reminder.queue.js";
 import redisConnection from "../src/config/redis.js";
@@ -30,9 +30,10 @@ const successResult = (id = "wamid.delivery.test.1") => ({
 
 let worker;
 let currentSendFn;
+let harnessQueue;
 
 const addJob = async (reminder) => {
-  return reminderQueue.add(
+  return harnessQueue.add(
     "send-reminder",
     {
       reminderId: reminder._id.toString(),
@@ -75,12 +76,24 @@ const reminderById = async (id) => Reminder.findById(id).lean();
 before(async () => {
   await mongoose.connect(process.env.MONGO_URI);
 
+  // Dedicated queue so this file's worker never competes with other test
+  // files' workers on the shared "reminders" queue (parallel-file isolation).
+  harnessQueue = new Queue("reminders-delivery-harness", {
+    connection: redisConnection,
+  });
+
   worker = new Worker(
-    "reminders",
+    "reminders-delivery-harness",
     async (job) => {
       const reminder = await Reminder.findById(job.data.reminderId);
 
       if (!reminder) return;
+
+      if (!currentSendFn) {
+        throw new Error(
+          "test harness: currentSendFn is not set; refusing to fall back to a real WhatsApp send",
+        );
+      }
 
       await deliverReminder(reminder, job, currentSendFn);
     },
@@ -90,6 +103,7 @@ before(async () => {
 
 after(async () => {
   await worker?.close().catch(() => {});
+  await harnessQueue?.close().catch(() => {});
   await reminderQueue.close().catch(() => {});
   await redisConnection.quit().catch(() => {});
   await mongoose.disconnect();
@@ -116,7 +130,7 @@ describe("deliverReminder", () => {
       assert.equal(done.deliveredMessageId, "wamid.delivery.ok");
       assert.equal(done.lastError, null);
     } finally {
-      await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+      await harnessQueue.remove(reminder._id.toString()).catch(() => {});
       await Reminder.deleteOne({ _id: reminder._id });
     }
   });
@@ -148,7 +162,7 @@ describe("deliverReminder", () => {
       assert.equal(done.deliveredMessageId, "wamid.delivery.retry");
       assert.equal(done.lastError, null);
     } finally {
-      await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+      await harnessQueue.remove(reminder._id.toString()).catch(() => {});
       await Reminder.deleteOne({ _id: reminder._id });
     }
   });
@@ -182,7 +196,7 @@ describe("deliverReminder", () => {
       assert.equal(calls, beforeGrace, "no fourth attempt after grace period");
       assert.equal((await reminderById(reminder._id)).deliveryAttempts, 3);
     } finally {
-      await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+      await harnessQueue.remove(reminder._id.toString()).catch(() => {});
       await Reminder.deleteOne({ _id: reminder._id });
     }
   });
@@ -210,7 +224,7 @@ describe("deliverReminder", () => {
       assert.equal(failed.status, "failed");
       assert.equal(failed.lastError, "Bad Request: invalid number");
 
-      const job = await reminderQueue.getJob(reminder._id.toString());
+      const job = await harnessQueue.getJob(reminder._id.toString());
 
       assert.equal(job.attemptsMade, 1, "job failed without consuming retries");
 
@@ -218,7 +232,7 @@ describe("deliverReminder", () => {
 
       assert.equal(calls, 1, "no retry after grace period");
     } finally {
-      await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+      await harnessQueue.remove(reminder._id.toString()).catch(() => {});
       await Reminder.deleteOne({ _id: reminder._id });
     }
   });
@@ -268,7 +282,7 @@ describe("scheduling retry configuration", () => {
       assert.equal(job.opts.backoff.delay, 5000);
       assert.ok(job.delay > 0, "scheduling behavior preserved");
     } finally {
-      await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+      await harnessQueue.remove(reminder._id.toString()).catch(() => {});
       await Reminder.deleteOne({ _id: reminder._id });
     }
   });

@@ -146,6 +146,7 @@ export const advanceRecurrence = async (reminder) => {
 
     if (existing) {
       await finalizeAdvancement(parentId, existing._id);
+      await scheduleReminderJob(existing);
       return existing;
     }
   }
