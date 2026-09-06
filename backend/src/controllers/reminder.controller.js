@@ -42,7 +42,14 @@ export const getAllReminders = async (req, res) => {
 
 export const deleteReminder = async (req, res) => {
     try {
-        await reminderService.deleteReminder(req.params.id);
+        const reminder = await reminderService.deleteReminder(req.params.id);
+
+        if (!reminder) {
+            return res.status(404).json({
+                success: false,
+                message: "Reminder not found",
+            });
+        }
 
         res.status(200).json({
             success: true,

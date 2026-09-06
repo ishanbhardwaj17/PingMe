@@ -269,6 +269,15 @@ export const recoverStrandedReminder = async (
 export const advanceRecurrence = async (reminder) => {
   const parentId = reminder._id;
 
+  // Deletion is authoritative: a parent that no longer exists must never
+  // create or advance anything (no orphan successors, no resurrection).
+  // This covers the delete-vs-advancement race deterministically.
+  const parentExists = await Reminder.exists({ _id: parentId });
+
+  if (!parentExists) {
+    return null;
+  }
+
   if (reminder.recurrenceNextId) {
     const existing = await Reminder.findById(reminder.recurrenceNextId);
 
@@ -380,8 +389,37 @@ export const getReminderById = async (id) => {
     return await Reminder.findById(id);
 };
 
+/**
+ * Hard-delete a reminder: the MongoDB document no longer exists.
+ *
+ * Deletion is separate from cancellation (which keeps the document with
+ * status "cancelled"). Semantics:
+ * - The document is removed authoritatively; a future worker execution can
+ *   never deliver it (findById -> null terminates processing, and the
+ *   delivery gate cannot match a deleted document).
+ * - The reminder's BullMQ job is removed when safely possible (waiting,
+ *   delayed, completed, failed). An in-flight active job cannot be removed
+ *   (verified against BullMQ 5.78): the worker may still be executing, but
+ *   its MongoDB writes cannot match a deleted document, so the durable
+ *   deletion state remains authoritative.
+ * - No recurrence cascade: existing successors remain independent; deleting
+ *   a parent does not advance or corrupt anything. A deleted parent's
+ *   recurrenceNextId may dangle until the recovery path re-creates the
+ *   successor if the parent is ever reprocessed.
+ * - The external side-effect race is unchanged: a WhatsApp request that has
+ *   already started cannot be retracted by deletion.
+ *
+ * @returns {Promise<object|null>} the deleted document, or null when the
+ *   id does not exist
+ */
 export const deleteReminder = async (id) => {
-    return await Reminder.findByIdAndDelete(id);
+    const reminder = await Reminder.findByIdAndDelete(id);
+
+    if (reminder) {
+        await reminderQueue.remove(id.toString()).catch(() => {});
+    }
+
+    return reminder;
 };
 
 /**

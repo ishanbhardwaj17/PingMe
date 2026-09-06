@@ -45,6 +45,13 @@ const worker = new Worker(
     if (reminder.isRecurring) {
       const successor = await advanceRecurrence(reminder);
 
+      if (!successor) {
+        console.log(
+          `Parent ${reminder._id} no longer exists; recurrence not advanced.`,
+        );
+        return;
+      }
+
       console.log(
         `Next recurring reminder scheduled for ${successor.reminderTime.toISOString()}`,
       );
