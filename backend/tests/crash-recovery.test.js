@@ -68,8 +68,16 @@ const processJob = async (job) => {
 
   if (!reminder) return;
 
-  if (!reminder.deliveredAt) {
-    await deliverReminder(reminder, job, currentSendFn);
+  if (reminder.status === "cancelled" || reminder.status === "failed") {
+    return;
+  }
+
+  if (reminder.deliveredAt) {
+    // skip the send only; recurrence still advances (mirrors the worker)
+  } else {
+    const outcome = await deliverReminder(reminder, job, currentSendFn);
+
+    if (outcome.skipped) return;
   }
 
   if (reminder.isRecurring) {

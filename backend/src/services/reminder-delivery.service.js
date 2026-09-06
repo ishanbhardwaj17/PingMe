@@ -68,10 +68,24 @@ export const deliverReminder = async (
     return { success: true, alreadyDelivered: true };
   }
 
-  await Reminder.updateOne(
-    { _id: reminder._id },
+  // Atomic lifecycle gate: the delivery-attempt increment succeeds only
+  // while the reminder is still pending. If a cancellation (or any other
+  // terminal transition) won the race, the send is skipped entirely. This
+  // is the mechanism that makes "once cancelled, never sent" race-safe.
+  const gate = await Reminder.updateOne(
+    { _id: reminder._id, status: "pending" },
     { $inc: { deliveryAttempts: 1 } },
   );
+
+  if (gate.modifiedCount === 0) {
+    const current = await Reminder.findById(reminder._id).lean();
+
+    return {
+      success: true,
+      skipped: true,
+      status: current?.status ?? "unknown",
+    };
+  }
 
   let result;
 
@@ -82,7 +96,7 @@ export const deliverReminder = async (
 
     if (isPermanentDeliveryError(error)) {
       await Reminder.updateOne(
-        { _id: reminder._id },
+        { _id: reminder._id, status: { $ne: "cancelled" } },
         { $set: { status: "failed", lastError: errorMessage } },
       );
 
@@ -95,12 +109,12 @@ export const deliverReminder = async (
 
     if (job.attemptsMade + 1 >= maxAttempts) {
       await Reminder.updateOne(
-        { _id: reminder._id },
+        { _id: reminder._id, status: { $ne: "cancelled" } },
         { $set: { status: "failed", lastError: errorMessage } },
       );
     } else {
       await Reminder.updateOne(
-        { _id: reminder._id },
+        { _id: reminder._id, status: { $ne: "cancelled" } },
         { $set: { lastError: errorMessage } },
       );
     }
@@ -108,8 +122,10 @@ export const deliverReminder = async (
     throw error;
   }
 
+  // A cancellation that raced with the send must never be regressed to
+  // "sent": the success transition only applies while not cancelled.
   await Reminder.updateOne(
-    { _id: reminder._id },
+    { _id: reminder._id, status: { $ne: "cancelled" } },
     {
       $set: {
         status: "sent",

@@ -4,6 +4,7 @@ import {
     createReminder,
     getAllReminders,
     deleteReminder,
+    cancelReminder,
     createReminderFromText
 } from "../controllers/reminder.controller.js";
 import User from "../models/user.model.js";
@@ -89,6 +90,8 @@ router.get("/stats/:phoneNumber", async (req, res) => {
 });
 
 router.delete("/:id", deleteReminder);
+
+router.post("/:id/cancel", cancelReminder);
 
 router.get("/digest/:phoneNumber", async (req, res) => {
   try {

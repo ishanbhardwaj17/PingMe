@@ -384,6 +384,48 @@ export const deleteReminder = async (id) => {
     return await Reminder.findByIdAndDelete(id);
 };
 
+/**
+ * Cancel a pending reminder.
+ *
+ * Lifecycle rule (verified by tests):
+ * - pending -> cancelled: the only allowed transition.
+ * - sent / failed -> immutable: returned unchanged (no resurrection, no
+ *   regression, no accidental "cancelled" rewrite of terminal states).
+ * - cancelled -> idempotent no-op.
+ *
+ * The state transition is a single atomic conditional update
+ * ({ _id, status: "pending" }), so it cannot race a worker: whichever of
+ * the cancellation or the delivery attempt gate wins, the loser observes
+ * the terminal state and backs off (the delivery attempt gate refuses to
+ * send once the reminder is not pending).
+ *
+ * The reminder's BullMQ job is removed after the transition (no-op when
+ * missing or when the job is already consumed). An in-flight worker that
+ * already passed the delivery gate may still complete its send; the
+ * success transition itself is guarded against regressing "cancelled" to
+ * "sent" in deliverReminder. Successors of recurring reminders are not
+ * touched: cancellation applies to one occurrence, not the chain.
+ *
+ * @returns {Promise<object|null>} the resulting reminder, or null when
+ *   the id does not exist
+ */
+export const cancelReminder = async (reminderId) => {
+  const cancelled = await Reminder.findOneAndUpdate(
+    { _id: reminderId, status: "pending" },
+    { $set: { status: "cancelled" } },
+    { new: true },
+  );
+
+  if (cancelled) {
+    await reminderQueue.remove(reminderId.toString()).catch(() => {});
+    return cancelled;
+  }
+
+  const existing = await Reminder.findById(reminderId);
+
+  return existing ?? null;
+};
+
 export const createReminderFromText = async ({
     userId,
   phoneNumber,

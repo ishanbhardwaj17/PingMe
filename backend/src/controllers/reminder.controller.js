@@ -56,6 +56,29 @@ export const deleteReminder = async (req, res) => {
     }
 };
 
+export const cancelReminder = async (req, res) => {
+    try {
+        const reminder = await reminderService.cancelReminder(req.params.id);
+
+        if (!reminder) {
+            return res.status(404).json({
+                success: false,
+                message: "Reminder not found",
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            reminder,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
 export const createReminderFromText = async (req, res) => {
     try {
         const { phoneNumber, text } = req.body;

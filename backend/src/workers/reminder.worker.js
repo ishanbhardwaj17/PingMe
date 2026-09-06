@@ -18,12 +18,27 @@ const worker = new Worker(
 
     if (!reminder) return;
 
+    if (reminder.status === "cancelled" || reminder.status === "failed") {
+      console.log(
+        `Reminder ${reminder.status} (${reminder._id}); skipping execution.`,
+      );
+      return;
+    }
+
     if (reminder.deliveredAt) {
       console.log(
         `Reminder already delivered (${reminder.deliveredAt.toISOString()}); skipping WhatsApp send.`,
       );
     } else {
-      await deliverReminder(reminder, job);
+      const outcome = await deliverReminder(reminder, job);
+
+      if (outcome.skipped) {
+        console.log(
+          `Reminder no longer pending (${outcome.status}); skipping execution.`,
+        );
+        return;
+      }
+
       console.log(`Reminder sent: ${reminder.task}`);
     }
 
