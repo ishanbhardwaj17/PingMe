@@ -96,19 +96,147 @@ export const createReminder = async (data) => {
 };
 
 /**
- * Finalize recurrence advancement on the parent occurrence. Repeatable:
- * re-setting the same successor id and timestamp is idempotent.
+ * Finalize recurrence advancement on the parent occurrence. Repeatable and
+ * stale-safe:
+ * - recurrenceNextId is idempotently (re)set; concurrent callers converge
+ *   on the same successor because successor identity is unique per parent.
+ * - recurrenceAdvancedAt is set only when still null; once set, a
+ *   stale/duplicate execution can never move it forward ($min keeps the
+ *   earliest claim). Two targeted updates because $min does not apply when
+ *   the current value is null (BSON ordering places null below dates).
  */
 const finalizeAdvancement = async (parentId, successorId) => {
+  const now = new Date();
+
   await Reminder.updateOne(
-    { _id: parentId },
+    { _id: parentId, recurrenceAdvancedAt: null },
     {
       $set: {
         recurrenceNextId: successorId,
-        recurrenceAdvancedAt: new Date(),
+        recurrenceAdvancedAt: now,
       },
     },
   );
+
+  await Reminder.updateOne(
+    { _id: parentId, recurrenceAdvancedAt: { $ne: null } },
+    {
+      $set: {
+        recurrenceNextId: successorId,
+      },
+      $min: {
+        recurrenceAdvancedAt: now,
+      },
+    },
+  );
+};
+
+/**
+ * Find reminders that may have been stranded by a worker crash:
+ * an attempt was made (deliveryAttempts > 0), no delivery was recorded,
+ * and the reminder is still pending with no terminal state.
+ *
+ * Optional olderThanMs bounds the search to reminders that have not been
+ * touched recently (e.g. last attempt older than the BullMQ lock window).
+ */
+export const findStrandedReminders = async ({ olderThanMs = 0 } = {}) => {
+  const filter = {
+    status: "pending",
+    deliveredAt: null,
+    deliveryAttempts: { $gt: 0 },
+  };
+
+  if (olderThanMs > 0) {
+    filter.updatedAt = { $lte: new Date(Date.now() - olderThanMs) };
+  }
+
+  return Reminder.find(filter).lean();
+};
+
+/**
+ * Recover a stranded reminder by re-scheduling its BullMQ job.
+ *
+ * Explicit safety conditions (no invented locks):
+ *
+ * 1. Delivered reminders: no-op (never re-sent, never re-queued).
+ * 2. Non-pending reminders (terminal states): no-op.
+ * 3. Stale-safety window: when olderThanMs > 0, the reminder is refused
+ *    (returns null) unless its updatedAt is older than the window. updatedAt
+ *    is written by every state change, including the atomic
+ *    deliveryAttempts increment at the start of each delivery attempt, so a
+ *    live worker's in-flight attempt keeps the reminder inside the window.
+ *    A recommended threshold is at least the BullMQ lock window plus the
+ *    stalled-recovery margin (e.g. 120s for lockDuration 30s +
+ *    stalledInterval 30s + retry backoff).
+ * 4. Job liveness: if the reminder already has a waiting or delayed job the
+ *    job will run on its own (no-op). If the job is active, a worker owns
+ *    it (no-op). Only completed/failed jobs are removed before re-adding;
+ *    a missing job is created. The deterministic jobId guarantees at most
+ *    one queued job.
+ * 5. Past-due reminders are scheduled immediately (delay 0): a late
+ *    delivery is preferred over a permanently stranded reminder.
+ *
+ * @returns {Promise<object|null>} the reminder, or null when refused by
+ *   the stale-safety window
+ */
+export const recoverStrandedReminder = async (
+  reminderId,
+  { olderThanMs = 0 } = {},
+) => {
+  const reminder = await Reminder.findById(reminderId);
+
+  if (!reminder) return null;
+
+  if (reminder.deliveredAt) return reminder;
+
+  if (reminder.status !== "pending") return reminder;
+
+  if (olderThanMs > 0) {
+    const lastTouch =
+      reminder.updatedAt?.getTime() ?? reminder.createdAt.getTime();
+
+    if (Date.now() - lastTouch < olderThanMs) {
+      return null;
+    }
+  }
+
+  const job = await reminderQueue.getJob(reminderId.toString());
+
+  if (job) {
+    const state = await job.getState();
+
+    if (state === "waiting" || state === "delayed" || state === "active") {
+      return reminder;
+    }
+
+    await reminderQueue.remove(reminderId.toString()).catch(() => {});
+  }
+
+  const delay = reminder.reminderTime.getTime() - Date.now();
+
+  if (delay > 0) {
+    await scheduleReminderJob(reminder);
+  } else {
+    await reminderQueue.add(
+      "send-reminder",
+      {
+        reminderId: reminder._id.toString(),
+        task: reminder.task,
+        phoneNumber: reminder.phoneNumber,
+      },
+      {
+        jobId: reminder._id.toString(),
+        delay: 0,
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000,
+        },
+      },
+    );
+  }
+
+  return reminder;
 };
 
 /**
