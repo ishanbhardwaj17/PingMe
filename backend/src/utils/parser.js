@@ -7,17 +7,47 @@ export const parseReminderText = (message) => {
     throw new Error("Could not understand date/time");
   }
 
-  const parsedDate = results[0].start.date();
+  const reminderTime = results[0].start.date();
 
-  const dateText = results[0].text;
+  // Remove the leading command prefix ("Remind me ..." or "Remind me to ...").
+  // The word boundary after "to" prevents eating the "to" of words like
+  // "tomorrow".
+  const prefixStripped = message.replace(/^remind me(?:\s+to\b)?\s*/i, "");
+  const prefixLength = message.length - prefixStripped.length;
 
-  let task = message
-    .replace(/remind me to/i, "")
-    .replace(dateText, "")
-    .trim();
+  // Remove every chrono-matched date/time span by index, so task words that
+  // merely resemble time text elsewhere in the message are untouched.
+  const spans = results
+    .map((result) => ({
+      start: Math.max(0, result.index - prefixLength),
+      end: Math.max(
+        0,
+        Math.min(
+          prefixStripped.length,
+          result.index + result.text.length - prefixLength,
+        ),
+      ),
+    }))
+    .filter((span) => span.end > span.start)
+    .sort((a, b) => a.start - b.start);
 
+  let task = "";
+  let cursor = 0;
+
+  for (const span of spans) {
+    if (span.start > cursor) {
+      task += prefixStripped.slice(cursor, span.start);
+    }
+
+    cursor = Math.max(cursor, span.end);
+  }
+
+  task += prefixStripped.slice(cursor);
+
+  // "Remind me <time> to <task>" word order leaves a leading "to" before
+  // the task once the time span is removed.
   return {
-    task,
-    reminderTime: parsedDate,
+    task: task.replace(/^\s*to\b\s*/i, "").trim(),
+    reminderTime,
   };
 };

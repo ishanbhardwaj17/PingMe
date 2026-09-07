@@ -38,4 +38,37 @@ describe("parseReminderText", () => {
 
     assert.equal(parsed.task, "water the plants");
   });
+
+  it('A: parses "Remind me tomorrow at 8 PM to call Mom"', () => {
+    const parsed = parseReminderText("Remind me tomorrow at 8 PM to call Mom");
+
+    assert.equal(parsed.task, "call Mom");
+
+    const date = new Date(parsed.reminderTime);
+
+    assert.equal(date.getHours(), 20);
+  });
+
+  it('B: parses "Remind me to call Mom tomorrow at 8 PM" to the same result', () => {
+    const first = parseReminderText("Remind me tomorrow at 8 PM to call Mom");
+    const second = parseReminderText("Remind me to call Mom tomorrow at 8 PM");
+
+    assert.equal(second.task, "call Mom");
+    assert.equal(
+      new Date(second.reminderTime).getTime(),
+      new Date(first.reminderTime).getTime(),
+    );
+  });
+
+  it("D: preserves recurrence phrasing in the task (existing semantics)", () => {
+    const parsed = parseReminderText(
+      "Remind me to take medicine every day at 8 PM",
+    );
+
+    assert.equal(parsed.task, "take medicine every day");
+
+    const date = new Date(parsed.reminderTime);
+
+    assert.equal(date.getHours(), 20);
+  });
 });
