@@ -2,7 +2,31 @@ import { Worker } from "bullmq";
 import connection from "../config/redis.js";
 import Reminder from "../models/reminder.model.js";
 import { advanceRecurrence } from "../services/reminder.service.js";
+import { runStrandRecoveryPass } from "../services/reminder.service.js";
 import { deliverReminder } from "../services/reminder-delivery.service.js";
+
+const STRAND_RECOVERY_INTERVAL_MS = 60_000;
+const STRAND_RECOVERY_AGE_MS = 120_000;
+
+const tickStrandRecovery = async () => {
+  try {
+    const result = await runStrandRecoveryPass({
+      olderThanMs: STRAND_RECOVERY_AGE_MS,
+    });
+
+    if (result.detected > 0) {
+      console.log(
+        `Strand recovery: detected ${result.detected}, recovered ${result.recovered}`,
+      );
+    }
+  } catch (error) {
+    console.error("Strand recovery pass failed:", error.message);
+  }
+};
+
+// Immediate first pass, then periodic recovery while this process runs.
+tickStrandRecovery();
+setInterval(tickStrandRecovery, STRAND_RECOVERY_INTERVAL_MS);
 
 const worker = new Worker(
   "reminders",

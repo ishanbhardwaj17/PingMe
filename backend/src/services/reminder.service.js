@@ -132,9 +132,17 @@ const finalizeAdvancement = async (parentId, successorId) => {
 };
 
 /**
- * Find reminders that may have been stranded by a worker crash:
- * an attempt was made (deliveryAttempts > 0), no delivery was recorded,
- * and the reminder is still pending with no terminal state.
+ * Find reminders that may be stranded: pending, undelivered, overdue, and
+ * not in any terminal state.
+ *
+ * Covers two classes:
+ * - deliveryAttempts > 0: delivery started but never completed (worker
+ *   crash / stalled job that was never recovered).
+ * - deliveryAttempts = 0: the reminder was persisted but its BullMQ job
+ *   was never created (scheduling failure at creation) or was lost.
+ *
+ * The overdue bound (reminderTime in the past) is what makes a
+ * zero-attempt reminder distinguishable from an ordinary future reminder.
  *
  * Optional olderThanMs bounds the search to reminders that have not been
  * touched recently (e.g. last attempt older than the BullMQ lock window).
@@ -143,7 +151,7 @@ export const findStrandedReminders = async ({ olderThanMs = 0 } = {}) => {
   const filter = {
     status: "pending",
     deliveredAt: null,
-    deliveryAttempts: { $gt: 0 },
+    reminderTime: { $lt: new Date() },
   };
 
   if (olderThanMs > 0) {
@@ -151,6 +159,44 @@ export const findStrandedReminders = async ({ olderThanMs = 0 } = {}) => {
   }
 
   return Reminder.find(filter).lean();
+};
+
+/**
+ * Run one strand-recovery pass: detect overdue pending reminders without a
+ * live job and re-schedule them through the existing safety gates.
+ *
+ * Bounded and idempotent: per-reminder errors are isolated, the stale
+ * window and job-liveness gates in recoverStrandedReminder prevent racing
+ * an active worker or a live job, and the deterministic jobId makes
+ * repeated/concurrent scheduling converge on exactly one job.
+ *
+ * @returns {Promise<{detected: number, recovered: number}>}
+ */
+export const runStrandRecoveryPass = async ({
+  olderThanMs = 120_000,
+} = {}) => {
+  const strands = await findStrandedReminders({ olderThanMs });
+
+  let recovered = 0;
+
+  for (const strand of strands) {
+    try {
+      const result = await recoverStrandedReminder(strand._id, {
+        olderThanMs,
+      });
+
+      if (result) {
+        recovered++;
+      }
+    } catch (error) {
+      console.error(
+        `Strand recovery failed for ${strand._id}:`,
+        error.message,
+      );
+    }
+  }
+
+  return { detected: strands.length, recovered };
 };
 
 /**

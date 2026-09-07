@@ -426,7 +426,13 @@ describe("stranded reminder detection and recovery", () => {
 
     await Reminder.updateOne(
       { _id: reminder._id },
-      { $set: { deliveryAttempts: 1, status: "pending" } },
+      {
+        $set: {
+          deliveryAttempts: 1,
+          status: "pending",
+          reminderTime: new Date(Date.now() - 60_000),
+        },
+      },
     );
 
     const stranded = await findStrandedReminders();
