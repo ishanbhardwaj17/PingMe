@@ -397,18 +397,82 @@ export const getUserReminders = async (userId) => {
 };
 
 export const getUpcomingReminders = async (userId) => {
+    return await Reminder.find(getSelectableReminderFilter(userId))
+        .sort({
+            reminderTime: 1,
+            _id: 1,
+        })
+        .lean();
+};
+
+/**
+ * The shared "selectable reminder" filter used by the WhatsApp list and by
+ * numbered selection: pending, undelivered, future reminders only. Sent,
+ * failed, cancelled, delivered, and past reminders are never selectable.
+ */
+const getSelectableReminderFilter = (userId) => {
     const now = new Date();
 
-    return await Reminder.find({
+    return {
         userId,
+        status: "pending",
+        deliveredAt: null,
         reminderTime: {
             $gt: now,
         },
-    })
-        .sort({
-            reminderTime: 1,
-        })
+    };
+};
+
+/**
+ * Select one upcoming reminder by its number in the numbered list.
+ *
+ * Uses exactly the same query and ordering as getUpcomingReminders
+ * (reminderTime ascending, _id ascending as the deterministic tie-breaker),
+ * so list numbering and selection always agree. Enforces user ownership and
+ * never selects sent/failed/cancelled/delivered/past reminders.
+ *
+ * @returns {Promise<object|null>} the selected reminder or null
+ */
+export const getReminderByNumberForUser = async (userId, number) => {
+    if (!Number.isInteger(number) || number < 1) {
+        return null;
+    }
+
+    const reminder = await Reminder.findOne(getSelectableReminderFilter(userId))
+        .sort({ reminderTime: 1, _id: 1 })
+        .skip(number - 1)
         .lean();
+
+    return reminder ?? null;
+};
+
+/**
+ * Update a pending reminder's task and reminderTime, preserving its _id and
+ * BullMQ job identity (jobId = reminder._id).
+ *
+ * Only status pending can be edited. The old scheduled job is removed and
+ * the new time is scheduled through the existing scheduleReminderJob. The
+ * remove -> schedule gap is a small window that the existing strand
+ * recovery covers if the reminder becomes overdue with no job.
+ *
+ * @returns {Promise<object|null>} the updated reminder, or null when the
+ *   reminder does not exist or is not editable
+ */
+export const updateReminder = async (reminderId, { task, reminderTime }) => {
+    const updated = await Reminder.findOneAndUpdate(
+        { _id: reminderId, status: "pending" },
+        { $set: { task, reminderTime } },
+        { returnDocument: "after" },
+    );
+
+    if (!updated) {
+        return null;
+    }
+
+    await reminderQueue.remove(reminderId.toString()).catch(() => {});
+    await scheduleReminderJob(updated);
+
+    return updated;
 };
 
 export const getReminderStats = async (userId) => {
@@ -497,7 +561,7 @@ export const cancelReminder = async (reminderId) => {
   const cancelled = await Reminder.findOneAndUpdate(
     { _id: reminderId, status: "pending" },
     { $set: { status: "cancelled" } },
-    { new: true },
+    { returnDocument: "after" },
   );
 
   if (cancelled) {

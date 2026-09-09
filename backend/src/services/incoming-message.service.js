@@ -4,7 +4,10 @@ import { detectRecurrence } from "../utils/recurrenceParser.js";
 import {
   createReminder,
   getUpcomingReminders,
+  getReminderByNumberForUser,
   cancelPendingRemindersForUser,
+  cancelReminder,
+  updateReminder,
 } from "./reminder.service.js";
 import { generateDigest } from "./digest.service.js";
 import { sendWhatsAppMessage } from "./whatsapp.service.js";
@@ -13,6 +16,8 @@ import {
   INTENTS,
   HELP_TEXT,
   UNKNOWN_TEXT,
+  parseNumberedDelete,
+  parseNumberedEdit,
 } from "./commandRouter.service.js";
 import {
   claimInboundMessage,
@@ -21,17 +26,19 @@ import {
   markInboundMessageFailed,
 } from "./inbound-message.service.js";
 
+const formatTime = (date) =>
+  new Date(date).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
 const formatUpcomingReminders = (reminders) => {
   if (reminders.length === 0) {
     return "You have no upcoming reminders.";
   }
 
   const lines = reminders.map(
-    (reminder) =>
-      `• ${reminder.task} - ${new Date(reminder.reminderTime).toLocaleTimeString(
-        [],
-        { hour: "2-digit", minute: "2-digit" },
-      )}`,
+    (reminder, index) => `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}`,
   );
 
   return `Upcoming reminders:\n\n${lines.join("\n")}`;
@@ -113,6 +120,32 @@ export const handleIncomingMessage = async (
       }
 
       case INTENTS.DELETE_REMINDER: {
+        const numbered = parseNumberedDelete(text);
+
+        if (numbered) {
+          const selected = await getReminderByNumberForUser(
+            user._id,
+            numbered.number,
+          );
+
+          if (!selected) {
+            await sendFn(
+              phoneNumber,
+              `Sorry, I couldn't find reminder ${numbered.number}.`,
+            );
+            break;
+          }
+
+          await cancelReminder(selected._id);
+
+          await sendFn(
+            phoneNumber,
+            `Cancelled reminder ${numbered.number}: ${selected.task}`,
+          );
+
+          break;
+        }
+
         const cancelledCount = await cancelPendingRemindersForUser(user._id);
         const message =
           cancelledCount > 0
@@ -120,6 +153,68 @@ export const handleIncomingMessage = async (
             : "No pending reminders to cancel.";
 
         await sendFn(phoneNumber, message);
+
+        break;
+      }
+
+      case INTENTS.EDIT_REMINDER: {
+        const parsed = parseNumberedEdit(text);
+
+        if (!parsed) {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        const selected = await getReminderByNumberForUser(
+          user._id,
+          parsed.number,
+        );
+
+        if (!selected) {
+          await sendFn(
+            phoneNumber,
+            `Sorry, I couldn't find reminder ${parsed.number}.`,
+          );
+          break;
+        }
+
+        let newReminder;
+
+        try {
+          newReminder = parseReminderText(parsed.remainder);
+        } catch {
+          await sendFn(
+            phoneNumber,
+            "Sorry, I couldn't understand the new reminder text. Please try:\nedit reminder 1 to <task> tomorrow at 8 PM",
+          );
+          break;
+        }
+
+        if (new Date(newReminder.reminderTime).getTime() <= Date.now()) {
+          await sendFn(
+            phoneNumber,
+            "The new reminder time is in the past. Please provide a future time.",
+          );
+          break;
+        }
+
+        const updated = await updateReminder(selected._id, {
+          task: newReminder.task,
+          reminderTime: newReminder.reminderTime,
+        });
+
+        if (!updated) {
+          await sendFn(
+            phoneNumber,
+            `Sorry, reminder ${parsed.number} can no longer be edited.`,
+          );
+          break;
+        }
+
+        await sendFn(
+          phoneNumber,
+          `Updated reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+        );
 
         break;
       }

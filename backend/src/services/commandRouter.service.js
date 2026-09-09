@@ -3,6 +3,7 @@ const INTENTS = {
   LIST_REMINDERS: "LIST_REMINDERS",
   SHOW_DIGEST: "SHOW_DIGEST",
   DELETE_REMINDER: "DELETE_REMINDER",
+  EDIT_REMINDER: "EDIT_REMINDER",
   HELP: "HELP",
   UNKNOWN: "UNKNOWN",
 };
@@ -39,6 +40,14 @@ export const classifyMessage = (text) => {
     return { intent: INTENTS.CREATE_REMINDER };
   }
 
+  if (parseNumberedEdit(normalized)) {
+    return { intent: INTENTS.EDIT_REMINDER };
+  }
+
+  if (parseNumberedDelete(normalized)) {
+    return { intent: INTENTS.DELETE_REMINDER };
+  }
+
   if (/\b(?:cancel|delete)\s+(?:all\s+)?my reminders\b/.test(normalized)) {
     return { intent: INTENTS.DELETE_REMINDER };
   }
@@ -67,6 +76,40 @@ export const classifyMessage = (text) => {
   }
 
   return { intent: INTENTS.UNKNOWN };
+};
+
+const NUMBERED_DELETE_RE = /^(?:delete|cancel)\s+reminder\s+(\d+)\b/;
+const NUMBERED_EDIT_RE = /^edit\s+reminder\s+(\d+)\b/;
+
+/**
+ * Extract the number from "delete reminder N" / "cancel reminder N".
+ * @returns {{ number: number } | null}
+ */
+export const parseNumberedDelete = (text) => {
+  const match = NUMBERED_DELETE_RE.exec((text ?? "").toLowerCase().trim());
+
+  return match ? { number: Number(match[1]) } : null;
+};
+
+/**
+ * Extract the number and the replacement reminder text from
+ * "edit reminder N <new reminder text>".
+ * @returns {{ number: number, remainder: string } | null}
+ */
+export const parseNumberedEdit = (text) => {
+  const match = NUMBERED_EDIT_RE.exec((text ?? "").toLowerCase().trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const remainder = (text ?? "").trim().slice(match[0].length).trim();
+
+  if (!remainder) {
+    return null;
+  }
+
+  return { number: Number(match[1]), remainder };
 };
 
 export { INTENTS };
