@@ -510,6 +510,37 @@ export const cancelReminder = async (reminderId) => {
   return existing ?? null;
 };
 
+/**
+ * Bulk-cancel all pending reminders for a user (WhatsApp has no
+ * conversational reminder-selection state, so cancellation is bulk-only).
+ *
+ * - Only status pending is affected; sent/failed/cancelled are untouched.
+ * - The transition is a single atomic updateMany.
+ * - Each reminder's BullMQ job is removed using the deterministic jobId.
+ *
+ * @returns {Promise<number>} how many reminders were cancelled
+ */
+export const cancelPendingRemindersForUser = async (userId) => {
+  const pending = await Reminder.find({ userId, status: "pending" })
+    .select("_id")
+    .lean();
+
+  if (pending.length === 0) {
+    return 0;
+  }
+
+  const result = await Reminder.updateMany(
+    { userId, status: "pending" },
+    { $set: { status: "cancelled" } },
+  );
+
+  for (const reminder of pending) {
+    await reminderQueue.remove(reminder._id.toString()).catch(() => {});
+  }
+
+  return result.modifiedCount;
+};
+
 export const createReminderFromText = async ({
     userId,
   phoneNumber,

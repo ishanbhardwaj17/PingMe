@@ -4,60 +4,69 @@ const INTENTS = {
   SHOW_DIGEST: "SHOW_DIGEST",
   DELETE_REMINDER: "DELETE_REMINDER",
   HELP: "HELP",
+  UNKNOWN: "UNKNOWN",
 };
 
+export const HELP_TEXT =
+  "PingMe commands:\n\n• Remind me to ... tomorrow at 8 PM\n• Show my reminders\n• Today's schedule\n• Cancel my reminders\n• Help";
+
+export const UNKNOWN_TEXT =
+  "I didn't understand that command.\n\nTry:\n• Remind me to ...\n• Show my reminders\n• Today's schedule\n• Cancel my reminders\n• Help";
+
+/**
+ * Deterministically classify an incoming WhatsApp message.
+ *
+ * Ordering is critical:
+ * 1. CREATE_REMINDER first: any message that begins with "remind" is a
+ *    reminder command, even when its task contains words like delete,
+ *    remove, today, or schedule.
+ * 2. DELETE_REMINDER before LIST_REMINDERS, because every bulk-cancel
+ *    phrase ("cancel my reminders", "delete all my reminders") contains
+ *    the LIST phrase "my reminders".
+ * 3. LIST_REMINDERS, SHOW_DIGEST, HELP, then UNKNOWN as the fallback.
+ *
+ * Matching uses word boundaries so bare words ("delete", "remove",
+ * "today") never trigger an intent on their own.
+ */
 export const classifyMessage = (text) => {
-  const normalizedText = (text || "").toLowerCase().trim();
+  const normalized = (text ?? "").toLowerCase().trim();
 
-  if (!normalizedText) {
-    return {
-      intent: INTENTS.HELP,
-    };
+  if (!normalized) {
+    return { intent: INTENTS.HELP };
+  }
+
+  if (/^remind\b/.test(normalized)) {
+    return { intent: INTENTS.CREATE_REMINDER };
+  }
+
+  if (/\b(?:cancel|delete)\s+(?:all\s+)?my reminders\b/.test(normalized)) {
+    return { intent: INTENTS.DELETE_REMINDER };
   }
 
   if (
-    normalizedText.includes("show my reminders") ||
-    normalizedText.includes("list reminders") ||
-    normalizedText.includes("my reminders")
+    /\b(?:show|list)\s+(?:my\s+)?reminders\b/.test(normalized) ||
+    /\bmy reminders\b/.test(normalized)
   ) {
-    return {
-      intent: INTENTS.LIST_REMINDERS,
-    };
+    return { intent: INTENTS.LIST_REMINDERS };
   }
 
   if (
-    normalizedText.includes("delete") ||
-    normalizedText.includes("remove") ||
-    normalizedText.includes("cancel reminder")
+    /\btoday'?s schedule\b/.test(normalized) ||
+    /\btoday\b/.test(normalized) ||
+    /\bdigest\b/.test(normalized)
   ) {
-    return {
-      intent: INTENTS.DELETE_REMINDER,
-    };
+    return { intent: INTENTS.SHOW_DIGEST };
   }
 
   if (
-    normalizedText.includes("today") ||
-    normalizedText.includes("schedule") ||
-    normalizedText.includes("digest")
+    normalized === "help" ||
+    normalized === "commands" ||
+    /\bwhat can you do\b/.test(normalized)
   ) {
-    return {
-      intent: INTENTS.SHOW_DIGEST,
-    };
+    return { intent: INTENTS.HELP };
   }
 
-  if (
-    normalizedText === "help" ||
-    normalizedText.includes("what can you do") ||
-    normalizedText.includes("commands")
-  ) {
-    return {
-      intent: INTENTS.HELP,
-    };
-  }
-
-  return {
-    intent: INTENTS.CREATE_REMINDER,
-  };
+  return { intent: INTENTS.UNKNOWN };
 };
 
 export { INTENTS };
