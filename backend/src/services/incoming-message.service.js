@@ -26,6 +26,7 @@ import {
   markInboundMessageProcessed,
   markInboundMessageFailed,
 } from "./inbound-message.service.js";
+import { aiInterpretMessage } from "./ai-assistant.service.js";
 
 const formatTime = (date) =>
   new Date(date).toLocaleTimeString([], {
@@ -60,12 +61,15 @@ const formatUpcomingReminders = (reminders) => {
  * @param {string} phoneNumber
  * @param {string} text
  * @param {Function} [sendFn] - outbound sender (injectable for tests)
+ * @param {Function} [aiInterpret] - AI interpretation seam (injectable for
+ *   tests); only reached from the UNKNOWN intent
  */
 export const handleIncomingMessage = async (
   wamid,
   phoneNumber,
   text,
   sendFn = sendWhatsAppMessage,
+  aiInterpret = aiInterpretMessage,
 ) => {
   const record = await claimInboundMessage({ wamid, phoneNumber, text });
 
@@ -300,10 +304,57 @@ export const handleIncomingMessage = async (
       }
 
       default: {
-        // UNKNOWN: friendly response, never a parser attempt.
-        await sendFn(phoneNumber, UNKNOWN_TEXT);
+        // UNKNOWN: only this path may invoke the AI interpretation layer.
+        // Fail-closed: any AI failure (provider error, timeout, malformed
+        // output, invalid action) yields the friendly response and no
+        // reminder or job is created.
+        let action;
 
-        break;
+        try {
+          action = await aiInterpret(text, {
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          });
+        } catch (error) {
+          console.error("[ai] interpretation failed:", error.message);
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        if (!action || action.action !== "create_reminder") {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        let parsed;
+
+        try {
+          parsed = parseReminderText(
+            `Remind me to ${action.task} ${action.when}`,
+          );
+        } catch {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        const recurrencePattern =
+          action.recurrence === "none" ? null : action.recurrence;
+
+        const reminder = await createReminder({
+          phoneNumber,
+          task: parsed.task,
+          reminderTime: parsed.reminderTime,
+          userId: user._id,
+          isRecurring: recurrencePattern !== null,
+          recurrencePattern,
+        });
+
+        // Send confirmation back to WhatsApp
+        const confirmationText = `✅ Reminder set\n\n${parsed.task}`;
+        await sendFn(phoneNumber, confirmationText);
+
+        await markInboundMessageProcessed(record._id);
+
+        return reminder;
       }
     }
 
