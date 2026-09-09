@@ -18,6 +18,7 @@ import {
   UNKNOWN_TEXT,
   parseNumberedDelete,
   parseNumberedEdit,
+  parseNumberedSnooze,
 } from "./commandRouter.service.js";
 import {
   claimInboundMessage,
@@ -214,6 +215,79 @@ export const handleIncomingMessage = async (
         await sendFn(
           phoneNumber,
           `Updated reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+        );
+
+        break;
+      }
+
+      case INTENTS.SNOOZE_REMINDER: {
+        const parsed = parseNumberedSnooze(text);
+
+        if (!parsed) {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        const selected = await getReminderByNumberForUser(
+          user._id,
+          parsed.number,
+        );
+
+        if (!selected) {
+          await sendFn(
+            phoneNumber,
+            `Sorry, I couldn't find reminder ${parsed.number}.`,
+          );
+          break;
+        }
+
+        let snoozeTarget;
+
+        try {
+          snoozeTarget = parseReminderText(parsed.remainder);
+        } catch {
+          await sendFn(
+            phoneNumber,
+            "Sorry, I couldn't understand the snooze time. Please try:\nsnooze reminder 1 for 30 minutes",
+          );
+          break;
+        }
+
+        const newReminderTime = new Date(snoozeTarget.reminderTime);
+        const currentReminderTime = new Date(selected.reminderTime);
+
+        if (newReminderTime.getTime() <= Date.now()) {
+          await sendFn(
+            phoneNumber,
+            "The snooze time is in the past. Please provide a future time.",
+          );
+          break;
+        }
+
+        if (newReminderTime.getTime() <= currentReminderTime.getTime()) {
+          await sendFn(
+            phoneNumber,
+            "Snooze can only move a reminder to a later time.",
+          );
+          break;
+        }
+
+        const updated = await updateReminder(selected._id, {
+          task: selected.task,
+          reminderTime: newReminderTime,
+        });
+
+        if (!updated) {
+          await sendFn(
+            phoneNumber,
+            `Sorry, reminder ${parsed.number} can no longer be snoozed.`,
+          );
+          break;
+        }
+
+        await sendFn(
+          phoneNumber,
+          `Snoozed reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
         );
 
         break;

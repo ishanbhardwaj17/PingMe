@@ -4,6 +4,7 @@ const INTENTS = {
   SHOW_DIGEST: "SHOW_DIGEST",
   DELETE_REMINDER: "DELETE_REMINDER",
   EDIT_REMINDER: "EDIT_REMINDER",
+  SNOOZE_REMINDER: "SNOOZE_REMINDER",
   HELP: "HELP",
   UNKNOWN: "UNKNOWN",
 };
@@ -44,6 +45,10 @@ export const classifyMessage = (text) => {
     return { intent: INTENTS.EDIT_REMINDER };
   }
 
+  if (parseNumberedSnooze(normalized)) {
+    return { intent: INTENTS.SNOOZE_REMINDER };
+  }
+
   if (parseNumberedDelete(normalized)) {
     return { intent: INTENTS.DELETE_REMINDER };
   }
@@ -80,6 +85,7 @@ export const classifyMessage = (text) => {
 
 const NUMBERED_DELETE_RE = /^(?:delete|cancel)\s+reminder\s+(\d+)\b/;
 const NUMBERED_EDIT_RE = /^edit\s+reminder\s+(\d+)\b/;
+const NUMBERED_SNOOZE_RE = /^snooze\s+reminder\s+(\d+)\b/;
 
 /**
  * Extract the number from "delete reminder N" / "cancel reminder N".
@@ -98,6 +104,27 @@ export const parseNumberedDelete = (text) => {
  */
 export const parseNumberedEdit = (text) => {
   const match = NUMBERED_EDIT_RE.exec((text ?? "").toLowerCase().trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const remainder = (text ?? "").trim().slice(match[0].length).trim();
+
+  if (!remainder) {
+    return null;
+  }
+
+  return { number: Number(match[1]), remainder };
+};
+
+/**
+ * Extract the number and the snooze target from
+ * "snooze reminder N <for/in/until target>".
+ * @returns {{ number: number, remainder: string } | null}
+ */
+export const parseNumberedSnooze = (text) => {
+  const match = NUMBERED_SNOOZE_RE.exec((text ?? "").toLowerCase().trim());
 
   if (!match) {
     return null;
