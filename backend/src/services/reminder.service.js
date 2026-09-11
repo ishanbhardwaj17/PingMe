@@ -286,6 +286,57 @@ export const recoverStrandedReminder = async (
 };
 
 /**
+ * Stop a recurring reminder: the selected occurrence keeps its schedule but
+ * no successor is ever created from it again (advanceRecurrence refuses).
+ *
+ * The stop is authoritative against a concurrently racing advanceRecurrence:
+ * - the atomic conditional update marks the selected occurrence once;
+ * - any successor already created by an in-flight advance is cascaded
+ *   (flagged) so it also refuses to advance;
+ * - advanceRecurrence itself re-checks the parent after creating a
+ *   successor, closing the last window.
+ *
+ * Delivered history is never rewritten; unrelated reminders are untouched.
+ *
+ * @returns {Promise<object|null>} the stopped occurrence, or null when it
+ *   does not exist, is not pending, or is already stopped
+ */
+export const stopRecurringReminder = async (reminderId) => {
+  const stopped = await Reminder.findOneAndUpdate(
+    { _id: reminderId, status: "pending", recurrenceStoppedAt: null },
+    { $set: { recurrenceStoppedAt: new Date() } },
+    { returnDocument: "after" },
+  );
+
+  if (stopped) {
+    await Reminder.updateMany(
+      { recurrenceParentId: reminderId, recurrenceStoppedAt: null },
+      { $set: { recurrenceStoppedAt: new Date() } },
+    );
+  }
+
+  return stopped;
+};
+
+/**
+ * If the parent occurrence was stopped while a successor was being created
+ * by a concurrent advanceRecurrence, flag the successor too so the chain
+ * cannot continue past it.
+ */
+const stopSuccessorIfParentStopped = async (parentId, successorId) => {
+  const parent = await Reminder.findById(parentId)
+    .select("recurrenceStoppedAt")
+    .lean();
+
+  if (parent?.recurrenceStoppedAt) {
+    await Reminder.updateOne(
+      { _id: successorId, recurrenceStoppedAt: null },
+      { $set: { recurrenceStoppedAt: new Date() } },
+    );
+  }
+};
+
+/**
  * Recoverably advance a recurring occurrence to its next occurrence.
  *
  * Successor identity is deterministic: the successor carries
@@ -324,12 +375,18 @@ export const advanceRecurrence = async (reminder) => {
     return null;
   }
 
+  // A stopped series must never produce another successor.
+  if (reminder.recurrenceStoppedAt) {
+    return null;
+  }
+
   if (reminder.recurrenceNextId) {
     const existing = await Reminder.findById(reminder.recurrenceNextId);
 
     if (existing) {
       await finalizeAdvancement(parentId, existing._id);
       await scheduleReminderJob(existing);
+      await stopSuccessorIfParentStopped(parentId, existing._id);
       return existing;
     }
   }
@@ -339,6 +396,7 @@ export const advanceRecurrence = async (reminder) => {
   if (found) {
     await finalizeAdvancement(parentId, found._id);
     await scheduleReminderJob(found);
+    await stopSuccessorIfParentStopped(parentId, found._id);
     return found;
   }
 
@@ -377,6 +435,10 @@ export const advanceRecurrence = async (reminder) => {
   }
 
   await finalizeAdvancement(parentId, successor._id);
+
+  // Close the stop-vs-advance race: if the user stopped the series while
+  // this successor was being created, flag it so the chain ends here.
+  await stopSuccessorIfParentStopped(parentId, successor._id);
 
   return successor;
 };

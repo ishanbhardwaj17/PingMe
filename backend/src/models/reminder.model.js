@@ -64,6 +64,11 @@ const reminderSchema = new mongoose.Schema(
       default: null,
     },
 
+    recurrenceStoppedAt: {
+      type: Date,
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["pending", "sent", "failed", "cancelled"],

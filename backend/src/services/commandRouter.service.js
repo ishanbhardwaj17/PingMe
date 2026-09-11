@@ -8,6 +8,7 @@ const INTENTS = {
   POST_DELIVERY_DONE: "POST_DELIVERY_DONE",
   POST_DELIVERY_SNOOZE: "POST_DELIVERY_SNOOZE",
   POST_DELIVERY_REMIND_AGAIN: "POST_DELIVERY_REMIND_AGAIN",
+  STOP_RECURRING: "STOP_RECURRING",
   HELP: "HELP",
   UNKNOWN: "UNKNOWN",
 };
@@ -30,7 +31,8 @@ export const HELP_TEXT =
   "• What do I have tomorrow?\n\n" +
   "Manage by number or in normal language:\n" +
   "• edit reminder 2 to call Dad tomorrow at 6 PM\n" +
-  "• delete reminder 2\n" +
+  "• delete reminder 2 — cancels that reminder\n" +
+  "• stop reminder 2 — stops a repeating reminder\n" +
   "• snooze reminder 2 for 30 minutes\n" +
   "• Move my dentist reminder to Friday at 5 PM\n" +
   "• Cancel the reminder about Mom\n\n" +
@@ -91,6 +93,10 @@ export const classifyMessage = (text) => {
     return { intent: INTENTS.SNOOZE_REMINDER };
   }
 
+  if (parseNumberedStop(normalized)) {
+    return { intent: INTENTS.STOP_RECURRING };
+  }
+
   if (/^done\b/.test(normalized)) {
     return { intent: INTENTS.POST_DELIVERY_DONE };
   }
@@ -136,6 +142,7 @@ export const classifyMessage = (text) => {
 const NUMBERED_DELETE_RE = /^(?:delete|cancel)\s+reminder\s+(\d+)\b/;
 const NUMBERED_EDIT_RE = /^edit\s+reminder\s+(\d+)\b/;
 const NUMBERED_SNOOZE_RE = /^snooze\s+reminder\s+(\d+)\b/;
+const NUMBERED_STOP_RE = /^stop\s+reminder\s+(\d+)\b/;
 
 /**
  * Extract the number from "delete reminder N" / "cancel reminder N".
@@ -187,6 +194,16 @@ export const parseNumberedSnooze = (text) => {
   }
 
   return { number: Number(match[1]), remainder };
+};
+
+/**
+ * Extract the number from "stop reminder N" (stop the recurring series).
+ * @returns {{ number: number } | null}
+ */
+export const parseNumberedStop = (text) => {
+  const match = NUMBERED_STOP_RE.exec((text ?? "").toLowerCase().trim());
+
+  return match ? { number: Number(match[1]) } : null;
 };
 
 export { INTENTS };

@@ -10,6 +10,7 @@ import {
   cancelPendingRemindersForUser,
   cancelReminder,
   updateReminder,
+  stopRecurringReminder,
 } from "./reminder.service.js";
 import { generateDigest } from "./digest.service.js";
 import { sendWhatsAppMessage } from "./whatsapp.service.js";
@@ -22,6 +23,7 @@ import {
   parseNumberedDelete,
   parseNumberedEdit,
   parseNumberedSnooze,
+  parseNumberedStop,
 } from "./commandRouter.service.js";
 import {
   claimInboundMessage,
@@ -47,9 +49,13 @@ const formatUpcomingReminders = (reminders) => {
     return "You have no upcoming reminders.";
   }
 
-  const lines = reminders.map(
-    (reminder, index) => `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}`,
-  );
+  const lines = reminders.map((reminder, index) => {
+    const recurrenceNote = formatRecurrenceNote(reminder.recurrencePattern);
+
+    return `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}${
+      recurrenceNote ? ` (${recurrenceNote})` : ""
+    }`;
+  });
 
   return `Upcoming reminders:\n\n${lines.join("\n")}`;
 };
@@ -729,6 +735,53 @@ export const handleIncomingMessage = async (
         await sendFn(
           phoneNumber,
           `Snoozed reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+        );
+
+        break;
+      }
+
+      case INTENTS.STOP_RECURRING: {
+        const parsed = parseNumberedStop(text);
+
+        if (!parsed) {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        const selected = await getReminderByNumberForUser(
+          user._id,
+          parsed.number,
+        );
+
+        if (!selected) {
+          await sendFn(
+            phoneNumber,
+            `Sorry, I couldn't find reminder ${parsed.number}.`,
+          );
+          break;
+        }
+
+        if (!selected.isRecurring) {
+          await sendFn(
+            phoneNumber,
+            `Reminder ${parsed.number} is not recurring. Use delete reminder ${parsed.number} to cancel it.`,
+          );
+          break;
+        }
+
+        const stopped = await stopRecurringReminder(selected._id);
+
+        if (!stopped) {
+          await sendFn(
+            phoneNumber,
+            `Reminder ${parsed.number} can no longer be stopped.`,
+          );
+          break;
+        }
+
+        await sendFn(
+          phoneNumber,
+          `🛑 Recurring reminder stopped\n\n${selected.task}\n\nNo future reminders will be created.`,
         );
 
         break;
