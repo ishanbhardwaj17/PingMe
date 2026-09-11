@@ -1,7 +1,13 @@
 import User from "../models/user.model.js";
 import { normalizePhoneNumber } from "../utils/phone.js";
 
-export const findOrCreateUser = async (
+/**
+ * Resolve a user by canonical phone number, creating it when absent.
+ *
+ * @returns {Promise<{ user: object, isNew: boolean }>} isNew is true only
+ *   when this call created the user (first contact).
+ */
+export const resolveUser = async (
     phoneNumber,
     whatsappName = "WhatsApp User"
 ) => {
@@ -21,6 +27,8 @@ export const findOrCreateUser = async (
             console.log(
                 `New user created: ${canonicalPhone}`
             );
+
+            return { user, isNew: true };
         } catch (error) {
             // Concurrent creation of the same normalized number: the unique
             // phoneNumber index rejects the loser. Re-fetch the winner.
@@ -30,13 +38,22 @@ export const findOrCreateUser = async (
                 });
 
                 if (user) {
-                    return user;
+                    return { user, isNew: false };
                 }
             }
 
             throw error;
         }
     }
+
+    return { user, isNew: false };
+};
+
+export const findOrCreateUser = async (
+    phoneNumber,
+    whatsappName = "WhatsApp User"
+) => {
+    const { user } = await resolveUser(phoneNumber, whatsappName);
 
     return user;
 };

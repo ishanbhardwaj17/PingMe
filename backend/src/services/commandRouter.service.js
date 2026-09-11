@@ -12,11 +12,40 @@ const INTENTS = {
   UNKNOWN: "UNKNOWN",
 };
 
+export const WELCOME_TEXT =
+  "👋 Welcome to PingMe!\n\n" +
+  "I'm your WhatsApp reminder assistant. Just tell me what you want to remember:\n" +
+  "• Remind me tomorrow at 8 PM to call Mom\n" +
+  "• Remind me every day at 9 AM to drink water\n\n" +
+  "Ask me what's coming up, or edit, delete, and snooze reminders in normal language.\n\n" +
+  "Type help anytime for examples.";
+
 export const HELP_TEXT =
-  "PingMe commands:\n\n• Remind me to ... tomorrow at 8 PM\n• Show my reminders\n• Today's schedule\n• Cancel my reminders\n• Help";
+  "PingMe — reminders on WhatsApp\n\n" +
+  "Just tell me what to remember:\n" +
+  "• Remind me tomorrow at 8 PM to call Mom\n" +
+  "• Remind me every day at 9 AM to drink water\n\n" +
+  "Ask:\n" +
+  "• Show my reminders\n" +
+  "• What do I have tomorrow?\n\n" +
+  "Manage by number or in normal language:\n" +
+  "• edit reminder 2 to call Dad tomorrow at 6 PM\n" +
+  "• delete reminder 2\n" +
+  "• snooze reminder 2 for 30 minutes\n" +
+  "• Move my dentist reminder to Friday at 5 PM\n" +
+  "• Cancel the reminder about Mom\n\n" +
+  "After a reminder arrives:\n" +
+  "• done\n" +
+  "• snooze 30 minutes\n" +
+  "• remind me again tomorrow";
 
 export const UNKNOWN_TEXT =
-  "I didn't understand that command.\n\nTry:\n• Remind me to ...\n• Show my reminders\n• Today's schedule\n• Cancel my reminders\n• Help";
+  "I didn't understand that command.\n\n" +
+  "Try:\n" +
+  "• Remind me tomorrow at 8 PM to call Mom\n" +
+  "• Show my reminders\n" +
+  "• What do I have tomorrow?\n\n" +
+  "Type help for examples.";
 
 /**
  * Deterministically classify an incoming WhatsApp message.

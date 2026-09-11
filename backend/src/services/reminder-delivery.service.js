@@ -21,6 +21,11 @@ export const buildReminderMessage = (reminder) => {
     lines.push(`🔁 ${recurrenceNote}`);
   }
 
+  lines.push(
+    "",
+    "Reply: done • snooze 30 minutes • remind me again tomorrow",
+  );
+
   return lines.join("\n");
 };
 

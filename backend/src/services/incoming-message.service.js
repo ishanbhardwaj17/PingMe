@@ -1,4 +1,4 @@
-import { findOrCreateUser } from "./user.service.js";
+import { resolveUser } from "./user.service.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
 import {
@@ -18,6 +18,7 @@ import {
   INTENTS,
   HELP_TEXT,
   UNKNOWN_TEXT,
+  WELCOME_TEXT,
   parseNumberedDelete,
   parseNumberedEdit,
   parseNumberedSnooze,
@@ -507,7 +508,15 @@ export const handleIncomingMessage = async (
   await markInboundMessageProcessing(record._id);
 
   try {
-    const user = await findOrCreateUser(phoneNumber);
+    const { user, isNew } = await resolveUser(phoneNumber);
+
+    // First contact: welcome the user once, then process their message
+    // normally. Duplicate wamids never reach this point (the claim above
+    // already skipped them).
+    if (isNew) {
+      await sendFn(phoneNumber, WELCOME_TEXT);
+    }
+
     const { intent } = classifyMessage(text);
 
     switch (intent) {
