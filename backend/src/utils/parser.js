@@ -49,5 +49,10 @@ export const parseReminderText = (message) => {
   return {
     task: task.replace(/^\s*to\b\s*/i, "").trim(),
     reminderTime,
+    // Whether the parsed phrase explicitly specifies an hour (e.g.
+    // "tomorrow at 9 PM" -> true, "tomorrow" -> false). Used by
+    // post-delivery "remind me again" to preserve the original
+    // time-of-day for date-only phrases.
+    hourSpecified: results[0].start.isCertain("hour"),
   };
 };

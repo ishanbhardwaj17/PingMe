@@ -19,6 +19,17 @@ import {
 } from "../services/reminder.service.js";
 const router = express.Router();
 
+// Legacy unauthenticated REST surface (pre-webhook era). The product is
+// WhatsApp-only; these phone-keyed endpoints must not be publicly
+// reachable. Default-disabled unless ENABLE_LEGACY_API=true.
+router.use((req, res, next) => {
+  if (process.env.ENABLE_LEGACY_API !== "true") {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  next();
+});
+
 router.post("/", createReminder);
 
 router.get("/", getAllReminders);

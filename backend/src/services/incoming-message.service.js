@@ -6,6 +6,7 @@ import {
   getUpcomingReminders,
   getReminderByNumberForUser,
   getRemindersInTimeRange,
+  getLatestDeliveredReminder,
   cancelPendingRemindersForUser,
   cancelReminder,
   updateReminder,
@@ -29,6 +30,10 @@ import {
 } from "./inbound-message.service.js";
 import { aiInterpretMessage } from "./ai-assistant.service.js";
 import { resolveRange } from "../utils/timeRange.js";
+import {
+  formatReminderTimeLabel,
+  formatRecurrenceNote,
+} from "../utils/messageFormat.js";
 
 const formatTime = (date) =>
   new Date(date).toLocaleTimeString([], {
@@ -77,7 +82,190 @@ const handleAiCreate = async (action, phoneNumber, userId, sendFn) => {
     recurrencePattern,
   });
 
-  await sendFn(phoneNumber, `✅ Reminder set\n\n${parsed.task}`);
+  await sendFn(
+    phoneNumber,
+    buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern),
+  );
+
+  return reminder;
+};
+
+const buildConfirmation = (task, reminderTime, recurrencePattern) => {
+  const lines = [
+    "✅ Reminder set",
+    "",
+    task,
+    "",
+    `🕐 ${formatReminderTimeLabel(reminderTime)}`,
+  ];
+
+  const recurrenceNote = formatRecurrenceNote(recurrencePattern);
+
+  if (recurrenceNote) {
+    lines.push(`🔁 ${recurrenceNote}`);
+  }
+
+  return lines.join("\n");
+};
+
+/**
+ * Acknowledge "done" against the user's most recently delivered reminder.
+ * Acknowledgement only: no mutation, no status change, no new reminder.
+ *
+ * @returns {Promise<boolean>} true when a response was sent
+ */
+const handlePostDeliveryDone = async (phoneNumber, userId, sendFn) => {
+  const latest = await getLatestDeliveredReminder(userId);
+
+  if (!latest) {
+    await sendFn(
+      phoneNumber,
+      "I do not have a recent delivered reminder to mark done.",
+    );
+    return false;
+  }
+
+  await sendFn(phoneNumber, "Done! ✔️");
+
+  return true;
+};
+
+/**
+ * Create a follow-up reminder for the user's most recently delivered
+ * reminder, preserving the original task exactly. The target phrase is
+ * parsed by the existing chrono-based parser; the new time is relative to
+ * now (e.g. "snooze 30 minutes"). The delivered reminder is never modified.
+ *
+ * @returns {Promise<object|null>} the new reminder or null (a response has
+ *   already been sent in that case)
+ */
+const handlePostDeliverySnooze = async (text, phoneNumber, userId, sendFn) => {
+  const latest = await getLatestDeliveredReminder(userId);
+
+  if (!latest) {
+    await sendFn(
+      phoneNumber,
+      "I do not have a recent delivered reminder to snooze.",
+    );
+    return null;
+  }
+
+  const target = text.replace(/^snooze(?:\s+for)?\s*/i, "").trim();
+
+  // Bare durations ("snooze 30 minutes") need a connector for chrono;
+  // phrases that already carry one ("until tomorrow") are used as-is.
+  const phrase = /^(?:for|in|until|at|on|by)\b/i.test(target)
+    ? target
+    : `in ${target}`;
+
+  return createFollowUpReminder(latest, phrase, phoneNumber, userId, sendFn);
+};
+
+/**
+ * Create a follow-up reminder for the user's most recently delivered
+ * reminder for "remind me again <when>". For date-only phrases ("tomorrow",
+ * "next Monday") the original reminder's time-of-day is preserved; explicit
+ * times ("at 9 PM", "in 30 minutes") resolve as stated.
+ *
+ * @returns {Promise<object|null>} the new reminder or null (a response has
+ *   already been sent in that case)
+ */
+const handlePostDeliveryRemindAgain = async (
+  text,
+  phoneNumber,
+  userId,
+  sendFn,
+) => {
+  const latest = await getLatestDeliveredReminder(userId);
+
+  if (!latest) {
+    await sendFn(
+      phoneNumber,
+      "I do not have a recent delivered reminder to remind again.",
+    );
+    return null;
+  }
+
+  const target = text.replace(/^remind me again\b/i, "").trim();
+
+  if (!target) {
+    await sendFn(
+      phoneNumber,
+      "When should I remind you again?\nTry:\nremind me again tomorrow",
+    );
+    return null;
+  }
+
+  const reminder = await createFollowUpReminder(
+    latest,
+    target,
+    phoneNumber,
+    userId,
+    sendFn,
+    { preserveTimeOfDay: true },
+  );
+
+  return reminder;
+};
+
+/**
+ * Shared follow-up creation for post-delivery actions.
+ *
+ * The delivered reminder is never modified: a NEW reminder is created
+ * through the existing createReminder path (task preserved exactly, time
+ * resolved by chrono, BullMQ scheduling centralized).
+ *
+ * @param {object} latest - the latest delivered reminder (task source)
+ * @param {string} target - the natural-language time phrase
+ * @param {boolean} [preserveTimeOfDay] - for date-only phrases, reuse the
+ *   delivered reminder's local time-of-day instead of the current clock time
+ * @returns {Promise<object|null>} the new reminder or null (a response has
+ *   already been sent in that case)
+ */
+const createFollowUpReminder = async (
+  latest,
+  target,
+  phoneNumber,
+  userId,
+  sendFn,
+  { preserveTimeOfDay = false } = {},
+) => {
+  let parsed;
+
+  try {
+    parsed = parseReminderText(`Remind me to ${latest.task} ${target}`);
+  } catch {
+    await sendFn(phoneNumber, "Sorry, I couldn't understand that time.");
+    return null;
+  }
+
+  let newTime = new Date(parsed.reminderTime);
+
+  if (preserveTimeOfDay && !parsed.hourSpecified) {
+    const original = new Date(latest.reminderTime);
+
+    newTime.setHours(original.getHours(), original.getMinutes(), 0, 0);
+  }
+
+  if (newTime.getTime() <= Date.now()) {
+    await sendFn(
+      phoneNumber,
+      "That time is in the past. Please choose a future time.",
+    );
+    return null;
+  }
+
+  const reminder = await createReminder({
+    phoneNumber,
+    task: latest.task,
+    reminderTime: newTime,
+    userId,
+  });
+
+  await sendFn(
+    phoneNumber,
+    buildConfirmation(latest.task, reminder.reminderTime, null),
+  );
 
   return reminder;
 };
@@ -338,8 +526,10 @@ export const handleIncomingMessage = async (
         });
 
         // Send confirmation back to WhatsApp
-        const confirmationText = `✅ Reminder set\n\n${parsed.task}`;
-        await sendFn(phoneNumber, confirmationText);
+        await sendFn(
+          phoneNumber,
+          buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern),
+        );
 
         await markInboundMessageProcessed(record._id);
 
@@ -531,6 +721,44 @@ export const handleIncomingMessage = async (
           phoneNumber,
           `Snoozed reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
         );
+
+        break;
+      }
+
+      case INTENTS.POST_DELIVERY_DONE: {
+        await handlePostDeliveryDone(phoneNumber, user._id, sendFn);
+
+        break;
+      }
+
+      case INTENTS.POST_DELIVERY_SNOOZE: {
+        const followUp = await handlePostDeliverySnooze(
+          text,
+          phoneNumber,
+          user._id,
+          sendFn,
+        );
+
+        if (followUp) {
+          await markInboundMessageProcessed(record._id);
+          return followUp;
+        }
+
+        break;
+      }
+
+      case INTENTS.POST_DELIVERY_REMIND_AGAIN: {
+        const followUp = await handlePostDeliveryRemindAgain(
+          text,
+          phoneNumber,
+          user._id,
+          sendFn,
+        );
+
+        if (followUp) {
+          await markInboundMessageProcessed(record._id);
+          return followUp;
+        }
 
         break;
       }

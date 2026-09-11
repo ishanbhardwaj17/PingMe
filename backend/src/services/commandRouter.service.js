@@ -5,6 +5,9 @@ const INTENTS = {
   DELETE_REMINDER: "DELETE_REMINDER",
   EDIT_REMINDER: "EDIT_REMINDER",
   SNOOZE_REMINDER: "SNOOZE_REMINDER",
+  POST_DELIVERY_DONE: "POST_DELIVERY_DONE",
+  POST_DELIVERY_SNOOZE: "POST_DELIVERY_SNOOZE",
+  POST_DELIVERY_REMIND_AGAIN: "POST_DELIVERY_REMIND_AGAIN",
   HELP: "HELP",
   UNKNOWN: "UNKNOWN",
 };
@@ -19,13 +22,19 @@ export const UNKNOWN_TEXT =
  * Deterministically classify an incoming WhatsApp message.
  *
  * Ordering is critical:
- * 1. CREATE_REMINDER first: any message that begins with "remind" is a
- *    reminder command, even when its task contains words like delete,
- *    remove, today, or schedule.
- * 2. DELETE_REMINDER before LIST_REMINDERS, because every bulk-cancel
+ * 1. POST_DELIVERY_REMIND_AGAIN first: "remind me again ..." must never
+ *    fall into the generic CREATE_REMINDER pattern ("remind ...").
+ * 2. CREATE_REMINDER second: any message that begins with "remind" (but not
+ *    "remind me again") is a reminder command, even when its task contains
+ *    words like delete, remove, today, or schedule.
+ * 3. Numbered EDIT/SNOOZE before post-delivery actions so
+ *    "snooze reminder 2 for 30 minutes" keeps its numbered flow.
+ * 4. Post-delivery DONE and SNOOZE operate on the most recently delivered
+ *    reminder; they never match numbered forms.
+ * 5. DELETE_REMINDER before LIST_REMINDERS, because every bulk-cancel
  *    phrase ("cancel my reminders", "delete all my reminders") contains
  *    the LIST phrase "my reminders".
- * 3. LIST_REMINDERS, SHOW_DIGEST, HELP, then UNKNOWN as the fallback.
+ * 6. LIST_REMINDERS, SHOW_DIGEST, HELP, then UNKNOWN as the fallback.
  *
  * Matching uses word boundaries so bare words ("delete", "remove",
  * "today") never trigger an intent on their own.
@@ -35,6 +44,10 @@ export const classifyMessage = (text) => {
 
   if (!normalized) {
     return { intent: INTENTS.HELP };
+  }
+
+  if (/^remind me again\b/.test(normalized)) {
+    return { intent: INTENTS.POST_DELIVERY_REMIND_AGAIN };
   }
 
   if (/^remind\b/.test(normalized)) {
@@ -47,6 +60,14 @@ export const classifyMessage = (text) => {
 
   if (parseNumberedSnooze(normalized)) {
     return { intent: INTENTS.SNOOZE_REMINDER };
+  }
+
+  if (/^done\b/.test(normalized)) {
+    return { intent: INTENTS.POST_DELIVERY_DONE };
+  }
+
+  if (/^snooze\s+(?!reminder\b)(?:for\s+)?\S+/.test(normalized)) {
+    return { intent: INTENTS.POST_DELIVERY_SNOOZE };
   }
 
   if (parseNumberedDelete(normalized)) {

@@ -1,11 +1,33 @@
 import { sendWhatsAppMessage } from "./whatsapp.service.js";
 import { UnrecoverableError } from "bullmq";
 import Reminder from "../models/reminder.model.js";
+import {
+  formatReminderTimeLabel,
+  formatRecurrenceNote,
+} from "../utils/messageFormat.js";
+
+export const buildReminderMessage = (reminder) => {
+  const lines = [
+    "⏰ Reminder",
+    "",
+    reminder.task,
+    "",
+    `🕐 ${formatReminderTimeLabel(reminder.reminderTime)}`,
+  ];
+
+  const recurrenceNote = formatRecurrenceNote(reminder.recurrencePattern);
+
+  if (recurrenceNote) {
+    lines.push(`🔁 ${recurrenceNote}`);
+  }
+
+  return lines.join("\n");
+};
 
 export const sendReminder = async (reminder) => {
   return await sendWhatsAppMessage(
     reminder.phoneNumber,
-    `⏰ Reminder\n\n${reminder.task}`,
+    buildReminderMessage(reminder),
   );
 };
 

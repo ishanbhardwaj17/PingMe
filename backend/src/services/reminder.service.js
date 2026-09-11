@@ -406,6 +406,20 @@ export const getUpcomingReminders = async (userId) => {
 };
 
 /**
+ * The most recently delivered reminder for a user (deliveredAt descending,
+ * _id descending as the deterministic tie-breaker). Read-only; returns null
+ * when the user has no delivered reminder.
+ */
+export const getLatestDeliveredReminder = async (userId) => {
+    return await Reminder.findOne({
+        userId,
+        deliveredAt: { $ne: null },
+    })
+        .sort({ deliveredAt: -1, _id: -1 })
+        .lean();
+};
+
+/**
  * Selectable reminders whose scheduled time falls inside [start, end).
  *
  * Uses the same selectable philosophy as getUpcomingReminders (pending,
