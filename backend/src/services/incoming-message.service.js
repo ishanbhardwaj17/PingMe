@@ -5,6 +5,7 @@ import {
   createReminder,
   getUpcomingReminders,
   getReminderByNumberForUser,
+  getRemindersInTimeRange,
   cancelPendingRemindersForUser,
   cancelReminder,
   updateReminder,
@@ -27,6 +28,7 @@ import {
   markInboundMessageFailed,
 } from "./inbound-message.service.js";
 import { aiInterpretMessage } from "./ai-assistant.service.js";
+import { resolveRange } from "../utils/timeRange.js";
 
 const formatTime = (date) =>
   new Date(date).toLocaleTimeString([], {
@@ -220,6 +222,66 @@ const handleAiDelete = async (action, phoneNumber, userId, sendFn) => {
   );
 
   return cancelled;
+};
+
+/**
+ * Execute a validated AI list_reminders action.
+ *
+ * Read-only: the AI expresses only the temporal intent; the server resolves
+ * the boundaries (resolveRange), performs the user-scoped range query, and
+ * formats the result. "next_reminder" selects the earliest selectable
+ * reminder via the existing getUpcomingReminders.
+ *
+ * @returns {Promise<boolean>} always true (a response has been sent)
+ */
+const handleAiList = async (action, phoneNumber, userId, sendFn) => {
+  if (action.range === "next_reminder") {
+    const upcoming = await getUpcomingReminders(userId);
+
+    if (upcoming.length === 0) {
+      await sendFn(phoneNumber, "You have no upcoming reminders.");
+      return true;
+    }
+
+    const next = upcoming[0];
+
+    await sendFn(
+      phoneNumber,
+      `Next reminder:\n\n1. ${next.task} - ${formatTime(next.reminderTime)}`,
+    );
+
+    return true;
+  }
+
+  const resolved = resolveRange(action.range, action.date, new Date());
+
+  if (!resolved) {
+    await sendFn(phoneNumber, "Sorry, I couldn't understand that date.");
+    return true;
+  }
+
+  const reminders = await getRemindersInTimeRange(
+    userId,
+    resolved.start,
+    resolved.end,
+  );
+
+  if (reminders.length === 0) {
+    await sendFn(phoneNumber, `No reminders for ${resolved.label}. 🎉`);
+    return true;
+  }
+
+  const lines = reminders.map(
+    (reminder, index) =>
+      `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}`,
+  );
+
+  await sendFn(
+    phoneNumber,
+    `Reminders for ${resolved.label}:\n\n${lines.join("\n")}`,
+  );
+
+  return true;
 };
 
 /**
@@ -532,6 +594,12 @@ export const handleIncomingMessage = async (
             return cancelled;
           }
 
+          break;
+        }
+
+        if (action.action === "list_reminders") {
+          await handleAiList(action, phoneNumber, user._id, sendFn);
+          await markInboundMessageProcessed(record._id);
           break;
         }
 

@@ -21,6 +21,23 @@ const VALID_RECURRENCE = [
 const ALLOWED_FIELDS_CREATE = ["action", "task", "when", "recurrence"];
 const ALLOWED_FIELDS_EDIT = ["action", "target", "targetTask", "task", "when"];
 const ALLOWED_FIELDS_DELETE = ["action", "target", "targetTask"];
+const ALLOWED_FIELDS_LIST = ["action", "range", "date"];
+
+const VALID_LIST_RANGES = [
+  "today",
+  "tomorrow",
+  "this_week",
+  "next_week",
+  "next_reminder",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  "date",
+];
 
 export const INTERPRETATION_SYSTEM_PROMPT = `You are a message comprehension layer for a WhatsApp reminder assistant.
 
@@ -57,7 +74,20 @@ Rules for delete_reminder:
 - "targetTask" MUST exactly echo the task text of that list entry.
 - Never interpret bulk requests ("delete all my reminders", "cancel everything", "remove all reminders") as delete_reminder; return {"action":"none"} for those.
 - Never return reminder IDs, database references, or ownership information.
-- Never interpret any action other than create_reminder, edit_reminder, or delete_reminder.`;
+- Never interpret any action other than create_reminder, edit_reminder, or delete_reminder.
+
+LIST: when the message asks to SEE reminders for a specific time (a read-only query, not a creation/modification), return exactly:
+  {"action":"list_reminders","range":"today|tomorrow|this_week|next_week|next_reminder|monday|tuesday|wednesday|thursday|friday|saturday|sunday"}
+  or for a specific calendar date:
+  {"action":"list_reminders","range":"date","date":"<chrono-parseable date phrase, e.g. September 15>"}
+Rules for list_reminders:
+- "range" MUST be one of the exact values above.
+- Use "next_reminder" only when the user asks for the next/upcoming reminder.
+- Use "date" only for a specific calendar date; never invent a date the user did not mention.
+- Never generate timestamps, MongoDB queries, reminder IDs, user IDs, or phone numbers.
+- Do not choose individual reminders; the server selects them.
+- Keep explicit creation/edit/delete/snooze requests mapped to their existing actions.
+- Temporal LIST is read-only.`;
 
 /**
  * Strictly validate raw model output into an internal action.
@@ -96,6 +126,10 @@ export const interpretToAction = (rawModelOutput) => {
 
   if (parsed.action === "delete_reminder") {
     return validateDeleteAction(parsed);
+  }
+
+  if (parsed.action === "list_reminders") {
+    return validateListAction(parsed);
   }
 
   return null;
@@ -204,6 +238,38 @@ const validateDeleteAction = (parsed) => {
     target,
     targetTask: targetTask.trim(),
   };
+};
+
+const validateListAction = (parsed) => {
+  const { range, date } = parsed;
+
+  if (typeof range !== "string" || !VALID_LIST_RANGES.includes(range)) {
+    return null;
+  }
+
+  const hasDate = date !== undefined;
+
+  if (range === "date") {
+    if (!hasDate || typeof date !== "string" || date.trim() === "") {
+      return null;
+    }
+  } else if (hasDate) {
+    return null;
+  }
+
+  for (const key of Object.keys(parsed)) {
+    if (!ALLOWED_FIELDS_LIST.includes(key)) {
+      return null;
+    }
+  }
+
+  const action = { action: "list_reminders", range };
+
+  if (range === "date") {
+    action.date = date.trim();
+  }
+
+  return action;
 };
 
 /**

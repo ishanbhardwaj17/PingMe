@@ -406,6 +406,31 @@ export const getUpcomingReminders = async (userId) => {
 };
 
 /**
+ * Selectable reminders whose scheduled time falls inside [start, end).
+ *
+ * Uses the same selectable philosophy as getUpcomingReminders (pending,
+ * undelivered, user-owned) with a direct MongoDB range query — sent, failed,
+ * cancelled, delivered, and out-of-range reminders are never returned. The
+ * order matches the numbered list (reminderTime ascending, _id ascending).
+ */
+export const getRemindersInTimeRange = async (userId, start, end) => {
+    return await Reminder.find({
+        userId,
+        status: "pending",
+        deliveredAt: null,
+        reminderTime: {
+            $gte: start,
+            $lt: end,
+        },
+    })
+        .sort({
+            reminderTime: 1,
+            _id: 1,
+        })
+        .lean();
+};
+
+/**
  * The shared "selectable reminder" filter used by the WhatsApp list and by
  * numbered selection: pending, undelivered, future reminders only. Sent,
  * failed, cancelled, delivered, and past reminders are never selectable.
