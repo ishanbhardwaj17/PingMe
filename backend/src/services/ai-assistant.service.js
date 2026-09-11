@@ -20,6 +20,7 @@ const VALID_RECURRENCE = [
 
 const ALLOWED_FIELDS_CREATE = ["action", "task", "when", "recurrence"];
 const ALLOWED_FIELDS_EDIT = ["action", "target", "targetTask", "task", "when"];
+const ALLOWED_FIELDS_DELETE = ["action", "target", "targetTask"];
 
 export const INTERPRETATION_SYSTEM_PROMPT = `You are a message comprehension layer for a WhatsApp reminder assistant.
 
@@ -47,14 +48,24 @@ Rules for edit_reminder:
 - "task" is the FINAL intended task; it may equal targetTask (time change only) or be a new name (rename).
 - "when" is a natural-language time phrase (e.g. "tomorrow at 8 PM", "in 1 hour", "for 30 minutes"), never an ISO timestamp.
 - Omit "task" only when the task name stays the same; omit "when" only when the time stays the same. At least one must be present.
-- Never interpret deletion, bulk operations, or any action other than create_reminder or edit_reminder.`;
+
+DELETE: when the message asks to delete or cancel ONE specific existing reminder, return exactly:
+  {"action":"delete_reminder","target":<number>,"targetTask":"<exact task text from the provided list>"}
+Rules for delete_reminder:
+- Delete only one specific reminder.
+- "target" MUST be a number from the "Current reminders" list in the user message; never invent a number not represented by the list.
+- "targetTask" MUST exactly echo the task text of that list entry.
+- Never interpret bulk requests ("delete all my reminders", "cancel everything", "remove all reminders") as delete_reminder; return {"action":"none"} for those.
+- Never return reminder IDs, database references, or ownership information.
+- Never interpret any action other than create_reminder, edit_reminder, or delete_reminder.`;
 
 /**
  * Strictly validate raw model output into an internal action.
  *
  * The model output is untrusted input: the application validator is the
- * security boundary, never the prompt. Everything outside the two
- * whitelisted contracts (create_reminder, edit_reminder) is rejected.
+ * security boundary, never the prompt. Everything outside the three
+ * whitelisted contracts (create_reminder, edit_reminder, delete_reminder)
+ * is rejected.
  *
  * @param {string|object} rawModelOutput
  * @returns {object|null} validated action or null
@@ -81,6 +92,10 @@ export const interpretToAction = (rawModelOutput) => {
 
   if (parsed.action === "edit_reminder") {
     return validateEditAction(parsed);
+  }
+
+  if (parsed.action === "delete_reminder") {
+    return validateDeleteAction(parsed);
   }
 
   return null;
@@ -165,6 +180,30 @@ const validateEditAction = (parsed) => {
   }
 
   return action;
+};
+
+const validateDeleteAction = (parsed) => {
+  const { target, targetTask } = parsed;
+
+  if (!Number.isInteger(target) || target < 1) {
+    return null;
+  }
+
+  if (typeof targetTask !== "string" || targetTask.trim() === "") {
+    return null;
+  }
+
+  for (const key of Object.keys(parsed)) {
+    if (!ALLOWED_FIELDS_DELETE.includes(key)) {
+      return null;
+    }
+  }
+
+  return {
+    action: "delete_reminder",
+    target,
+    targetTask: targetTask.trim(),
+  };
 };
 
 /**

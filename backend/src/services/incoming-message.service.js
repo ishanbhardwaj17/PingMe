@@ -173,6 +173,56 @@ const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
 };
 
 /**
+ * Execute a validated AI delete_reminder action.
+ *
+ * The model's target number is re-resolved fresh at execution time, and the
+ * targetTask echo is verified against the freshly fetched reminder before
+ * any mutation. Only the existing cancelReminder() is used for the
+ * cancellation; any resolution failure yields a deterministic response with
+ * zero reminder or queue mutation.
+ *
+ * @returns {Promise<object|null>} the cancelled reminder or null (a response
+ *   has already been sent in that case)
+ */
+const handleAiDelete = async (action, phoneNumber, userId, sendFn) => {
+  const selected = await getReminderByNumberForUser(userId, action.target);
+
+  if (!selected) {
+    await sendFn(
+      phoneNumber,
+      `I couldn't find that reminder.\n\n${formatUpcomingReminders(
+        await getUpcomingReminders(userId),
+      )}`,
+    );
+    return null;
+  }
+
+  if (selected.task.toLowerCase() !== action.targetTask.toLowerCase()) {
+    await sendFn(
+      phoneNumber,
+      `Which reminder did you mean?\n\n${formatUpcomingReminders(
+        await getUpcomingReminders(userId),
+      )}`,
+    );
+    return null;
+  }
+
+  const cancelled = await cancelReminder(selected._id);
+
+  if (!cancelled || cancelled.status !== "cancelled") {
+    await sendFn(phoneNumber, "This reminder can no longer be deleted.");
+    return null;
+  }
+
+  await sendFn(
+    phoneNumber,
+    `Cancelled reminder ${action.target}: ${cancelled.task}`,
+  );
+
+  return cancelled;
+};
+
+/**
  * Handle an incoming WhatsApp message with durable webhook idempotency and
  * deterministic command routing.
  *
@@ -469,6 +519,17 @@ export const handleIncomingMessage = async (
           if (updated) {
             await markInboundMessageProcessed(record._id);
             return updated;
+          }
+
+          break;
+        }
+
+        if (action.action === "delete_reminder") {
+          const cancelled = await handleAiDelete(action, phoneNumber, user._id, sendFn);
+
+          if (cancelled) {
+            await markInboundMessageProcessed(record._id);
+            return cancelled;
           }
 
           break;
