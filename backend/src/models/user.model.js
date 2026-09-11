@@ -20,7 +20,12 @@ const userSchema = new mongoose.Schema(
 
         digestEnabled: {
             type: Boolean,
-            default: true,
+            default: false,
+        },
+
+        lastDigestSentDate: {
+            type: String,
+            default: null,
         },
     },
     {

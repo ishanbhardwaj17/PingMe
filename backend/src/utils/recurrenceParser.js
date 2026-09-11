@@ -11,6 +11,8 @@ export const RECURRENCE_PATTERNS = [
   "sunday",
 ];
 
+import { zonedDayParts, zonedLocalTimeInstant } from "./timezone.js";
+
 const WEEKDAYS = [
   "monday",
   "tuesday",
@@ -59,8 +61,18 @@ export const detectRecurrence = (text) => {
  * provided it is preserved across months: Jan 31 -> Feb 28 -> Mar 31 ->
  * Apr 30 -> May 31. Without an anchor (legacy reminders), the day of the
  * current occurrence is used and may drift after a short month.
+ *
+ * When `timezone` is provided, the occurrence's local wall time and the
+ * pattern arithmetic are evaluated in that zone (DST-aware); the result is
+ * the absolute instant of the next local occurrence. Without a timezone,
+ * server-local behavior is preserved.
  */
-export const advanceOccurrence = (reminderTime, pattern, anchorDay = null) => {
+export const advanceOccurrence = (
+  reminderTime,
+  pattern,
+  anchorDay = null,
+  timezone = null,
+) => {
   const next = new Date(reminderTime.getTime());
 
   if (pattern === "daily") {
@@ -82,7 +94,40 @@ export const advanceOccurrence = (reminderTime, pattern, anchorDay = null) => {
     next.setDate(Math.min(anchorDay ?? fallbackDay, lastValidDay));
   }
 
-  return next;
+  if (!timezone) {
+    return next;
+  }
+
+  return advanceOccurrenceZoned(reminderTime, next, pattern, anchorDay, timezone);
+};
+
+/**
+ * Rebuild the advanced occurrence's absolute instant from its local wall
+ * time in the user's timezone (DST-aware), so a daily 8:00 AM reminder
+ * stays 8:00 AM local across DST transitions.
+ */
+const advanceOccurrenceZoned = (reminderTime, serverNext, pattern, anchorDay, timezone) => {
+  const parts = zonedDayParts(reminderTime, timezone);
+
+  let year = parts.year;
+  let month = parts.month;
+  let day = parts.day;
+  const hour = parts.hour;
+  const minute = parts.minute;
+
+  if (pattern === "daily") {
+    day += 1;
+  } else if (pattern === "weekly" || WEEKDAYS.includes(pattern)) {
+    day += 7;
+  } else if (pattern === "monthly") {
+    month += 1;
+
+    const lastValidDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+    day = Math.min(anchorDay ?? day, lastValidDay);
+  }
+
+  return zonedLocalTimeInstant(year, month, day, hour, minute, timezone);
 };
 
 /**
@@ -95,6 +140,7 @@ export const resolveFutureOccurrence = (
   pattern,
   now = new Date(),
   anchorDay = null,
+  timezone = null,
 ) => {
   if (!pattern) {
     return new Date(reminderTime.getTime());
@@ -103,7 +149,7 @@ export const resolveFutureOccurrence = (
   let next = new Date(reminderTime.getTime());
 
   while (next.getTime() <= now.getTime()) {
-    next = advanceOccurrence(next, pattern, anchorDay);
+    next = advanceOccurrence(next, pattern, anchorDay, timezone);
   }
 
   return next;
@@ -113,5 +159,9 @@ export const resolveFutureOccurrence = (
  * Calculate the next occurrence after the given reminder time.
  * Used by the worker to schedule the following occurrence after delivery.
  */
-export const nextOccurrence = (reminderTime, pattern, anchorDay = null) =>
-  advanceOccurrence(reminderTime, pattern, anchorDay);
+export const nextOccurrence = (
+  reminderTime,
+  pattern,
+  anchorDay = null,
+  timezone = null,
+) => advanceOccurrence(reminderTime, pattern, anchorDay, timezone);

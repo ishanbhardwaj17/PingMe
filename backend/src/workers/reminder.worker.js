@@ -4,9 +4,11 @@ import Reminder from "../models/reminder.model.js";
 import { advanceRecurrence } from "../services/reminder.service.js";
 import { runStrandRecoveryPass } from "../services/reminder.service.js";
 import { deliverReminder } from "../services/reminder-delivery.service.js";
+import { runDigestSchedulerPass } from "../services/digest.service.js";
 
 const STRAND_RECOVERY_INTERVAL_MS = 60_000;
 const STRAND_RECOVERY_AGE_MS = 120_000;
+const DIGEST_INTERVAL_MS = 60_000;
 
 const tickStrandRecovery = async () => {
   try {
@@ -24,9 +26,24 @@ const tickStrandRecovery = async () => {
   }
 };
 
+const tickDigests = async () => {
+  try {
+    const sent = await runDigestSchedulerPass();
+
+    if (sent > 0) {
+      console.log(`Morning digest: sent ${sent}`);
+    }
+  } catch (error) {
+    console.error("Digest scheduler pass failed:", error.message);
+  }
+};
+
 // Immediate first pass, then periodic recovery while this process runs.
 tickStrandRecovery();
 setInterval(tickStrandRecovery, STRAND_RECOVERY_INTERVAL_MS);
+
+tickDigests();
+setInterval(tickDigests, DIGEST_INTERVAL_MS);
 
 const worker = new Worker(
   "reminders",

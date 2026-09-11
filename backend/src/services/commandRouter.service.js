@@ -9,6 +9,9 @@ const INTENTS = {
   POST_DELIVERY_SNOOZE: "POST_DELIVERY_SNOOZE",
   POST_DELIVERY_REMIND_AGAIN: "POST_DELIVERY_REMIND_AGAIN",
   STOP_RECURRING: "STOP_RECURRING",
+  SET_TIMEZONE: "SET_TIMEZONE",
+  ENABLE_DIGEST: "ENABLE_DIGEST",
+  DISABLE_DIGEST: "DISABLE_DIGEST",
   HELP: "HELP",
   UNKNOWN: "UNKNOWN",
 };
@@ -39,7 +42,11 @@ export const HELP_TEXT =
   "After a reminder arrives:\n" +
   "• done\n" +
   "• snooze 30 minutes\n" +
-  "• remind me again tomorrow";
+  "• remind me again tomorrow\n\n" +
+  "Settings:\n" +
+  "• set timezone Asia/Kolkata\n" +
+  "• enable digest — morning summary at 8 AM local time\n" +
+  "• disable digest";
 
 export const UNKNOWN_TEXT =
   "I didn't understand that command.\n\n" +
@@ -95,6 +102,18 @@ export const classifyMessage = (text) => {
 
   if (parseNumberedStop(normalized)) {
     return { intent: INTENTS.STOP_RECURRING };
+  }
+
+  if (/^set timezone\s+\S+/.test(normalized)) {
+    return { intent: INTENTS.SET_TIMEZONE };
+  }
+
+  if (/^enable digest$/.test(normalized)) {
+    return { intent: INTENTS.ENABLE_DIGEST };
+  }
+
+  if (/^disable digest$/.test(normalized)) {
+    return { intent: INTENTS.DISABLE_DIGEST };
   }
 
   if (/^done\b/.test(normalized)) {
@@ -204,6 +223,22 @@ export const parseNumberedStop = (text) => {
   const match = NUMBERED_STOP_RE.exec((text ?? "").toLowerCase().trim());
 
   return match ? { number: Number(match[1]) } : null;
+};
+
+/**
+ * Extract the timezone from "set timezone <iana>".
+ * @returns {{ timezone: string } | null}
+ */
+export const parseTimezoneCommand = (text) => {
+  const match = /^set timezone\s+(.+)$/i.exec((text ?? "").trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const timezone = match[1].trim();
+
+  return timezone ? { timezone } : null;
 };
 
 export { INTENTS };

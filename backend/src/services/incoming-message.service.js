@@ -1,4 +1,4 @@
-import { resolveUser } from "./user.service.js";
+import { resolveUser, setUserTimezone, setDigestEnabled } from "./user.service.js";
 import { parseReminderText } from "../utils/parser.js";
 import { detectRecurrence } from "../utils/recurrenceParser.js";
 import {
@@ -24,6 +24,7 @@ import {
   parseNumberedEdit,
   parseNumberedSnooze,
   parseNumberedStop,
+  parseTimezoneCommand,
 } from "./commandRouter.service.js";
 import {
   claimInboundMessage,
@@ -37,14 +38,17 @@ import {
   formatReminderTimeLabel,
   formatRecurrenceNote,
 } from "../utils/messageFormat.js";
+import { zonedFormatTime, zonedDayParts, zonedLocalTimeInstant } from "../utils/timezone.js";
 
-const formatTime = (date) =>
-  new Date(date).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const formatTime = (date, timezone) =>
+  timezone
+    ? zonedFormatTime(date, timezone)
+    : new Date(date).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
-const formatUpcomingReminders = (reminders) => {
+const formatUpcomingReminders = (reminders, timezone) => {
   if (reminders.length === 0) {
     return "You have no upcoming reminders.";
   }
@@ -52,7 +56,7 @@ const formatUpcomingReminders = (reminders) => {
   const lines = reminders.map((reminder, index) => {
     const recurrenceNote = formatRecurrenceNote(reminder.recurrencePattern);
 
-    return `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}${
+    return `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime, timezone)}${
       recurrenceNote ? ` (${recurrenceNote})` : ""
     }`;
   });
@@ -67,11 +71,14 @@ const formatUpcomingReminders = (reminders) => {
  * @returns {Promise<object|null>} the created reminder or null (a response
  *   has already been sent in that case)
  */
-const handleAiCreate = async (action, phoneNumber, userId, sendFn) => {
+const handleAiCreate = async (action, phoneNumber, userId, sendFn, timezone) => {
   let parsed;
 
   try {
-    parsed = parseReminderText(`Remind me to ${action.task} ${action.when}`);
+    parsed = parseReminderText(
+      `Remind me to ${action.task} ${action.when}`,
+      timezone,
+    );
   } catch {
     await sendFn(phoneNumber, UNKNOWN_TEXT);
     return null;
@@ -87,23 +94,24 @@ const handleAiCreate = async (action, phoneNumber, userId, sendFn) => {
     userId,
     isRecurring: recurrencePattern !== null,
     recurrencePattern,
+    timezone,
   });
 
   await sendFn(
     phoneNumber,
-    buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern),
+    buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern, timezone),
   );
 
   return reminder;
 };
 
-const buildConfirmation = (task, reminderTime, recurrencePattern) => {
+const buildConfirmation = (task, reminderTime, recurrencePattern, timezone) => {
   const lines = [
     "✅ Reminder set",
     "",
     task,
     "",
-    `🕐 ${formatReminderTimeLabel(reminderTime)}`,
+    `🕐 ${formatReminderTimeLabel(reminderTime, timezone)}`,
   ];
 
   const recurrenceNote = formatRecurrenceNote(recurrencePattern);
@@ -146,7 +154,7 @@ const handlePostDeliveryDone = async (phoneNumber, userId, sendFn) => {
  * @returns {Promise<object|null>} the new reminder or null (a response has
  *   already been sent in that case)
  */
-const handlePostDeliverySnooze = async (text, phoneNumber, userId, sendFn) => {
+const handlePostDeliverySnooze = async (text, phoneNumber, userId, sendFn, timezone) => {
   const latest = await getLatestDeliveredReminder(userId);
 
   if (!latest) {
@@ -165,7 +173,7 @@ const handlePostDeliverySnooze = async (text, phoneNumber, userId, sendFn) => {
     ? target
     : `in ${target}`;
 
-  return createFollowUpReminder(latest, phrase, phoneNumber, userId, sendFn);
+  return createFollowUpReminder(latest, phrase, phoneNumber, userId, sendFn, timezone);
 };
 
 /**
@@ -182,6 +190,7 @@ const handlePostDeliveryRemindAgain = async (
   phoneNumber,
   userId,
   sendFn,
+  timezone,
 ) => {
   const latest = await getLatestDeliveredReminder(userId);
 
@@ -209,6 +218,7 @@ const handlePostDeliveryRemindAgain = async (
     phoneNumber,
     userId,
     sendFn,
+    timezone,
     { preserveTimeOfDay: true },
   );
 
@@ -235,12 +245,16 @@ const createFollowUpReminder = async (
   phoneNumber,
   userId,
   sendFn,
+  timezone,
   { preserveTimeOfDay = false } = {},
 ) => {
   let parsed;
 
   try {
-    parsed = parseReminderText(`Remind me to ${latest.task} ${target}`);
+    parsed = parseReminderText(
+      `Remind me to ${latest.task} ${target}`,
+      timezone,
+    );
   } catch {
     await sendFn(phoneNumber, "Sorry, I couldn't understand that time.");
     return null;
@@ -249,9 +263,19 @@ const createFollowUpReminder = async (
   let newTime = new Date(parsed.reminderTime);
 
   if (preserveTimeOfDay && !parsed.hourSpecified) {
-    const original = new Date(latest.reminderTime);
+    // Tomorrow (or the parsed date) at the delivered reminder's local
+    // time-of-day in the user's timezone.
+    const parts = zonedDayParts(latest.reminderTime, timezone);
+    const targetParts = zonedDayParts(newTime, timezone);
 
-    newTime.setHours(original.getHours(), original.getMinutes(), 0, 0);
+    newTime = zonedLocalTimeInstant(
+      targetParts.year,
+      targetParts.month,
+      targetParts.day,
+      parts.hour,
+      parts.minute,
+      timezone,
+    );
   }
 
   if (newTime.getTime() <= Date.now()) {
@@ -267,11 +291,12 @@ const createFollowUpReminder = async (
     task: latest.task,
     reminderTime: newTime,
     userId,
+    timezone,
   });
 
   await sendFn(
     phoneNumber,
-    buildConfirmation(latest.task, reminder.reminderTime, null),
+    buildConfirmation(latest.task, reminder.reminderTime, null, timezone),
   );
 
   return reminder;
@@ -289,7 +314,7 @@ const createFollowUpReminder = async (
  * @returns {Promise<object|null>} the updated reminder or null (a response
  *   has already been sent in that case)
  */
-const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
+const handleAiEdit = async (action, phoneNumber, userId, sendFn, timezone) => {
   const selected = await getReminderByNumberForUser(userId, action.target);
 
   if (!selected) {
@@ -321,6 +346,7 @@ const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
     try {
       parsed = parseReminderText(
         `Remind me to ${finalTask} ${action.when}`,
+        timezone,
       );
     } catch {
       await sendFn(
@@ -363,7 +389,7 @@ const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
 
   await sendFn(
     phoneNumber,
-    `Updated reminder ${action.target}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+    `Updated reminder ${action.target}: ${updated.task} - ${formatTime(updated.reminderTime, timezone)}`,
   );
 
   return updated;
@@ -381,7 +407,7 @@ const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
  * @returns {Promise<object|null>} the cancelled reminder or null (a response
  *   has already been sent in that case)
  */
-const handleAiDelete = async (action, phoneNumber, userId, sendFn) => {
+const handleAiDelete = async (action, phoneNumber, userId, sendFn, timezone) => {
   const selected = await getReminderByNumberForUser(userId, action.target);
 
   if (!selected) {
@@ -429,7 +455,7 @@ const handleAiDelete = async (action, phoneNumber, userId, sendFn) => {
  *
  * @returns {Promise<boolean>} always true (a response has been sent)
  */
-const handleAiList = async (action, phoneNumber, userId, sendFn) => {
+const handleAiList = async (action, phoneNumber, userId, sendFn, timezone) => {
   if (action.range === "next_reminder") {
     const upcoming = await getUpcomingReminders(userId);
 
@@ -442,13 +468,13 @@ const handleAiList = async (action, phoneNumber, userId, sendFn) => {
 
     await sendFn(
       phoneNumber,
-      `Next reminder:\n\n1. ${next.task} - ${formatTime(next.reminderTime)}`,
+      `Next reminder:\n\n1. ${next.task} - ${formatTime(next.reminderTime, timezone)}`,
     );
 
     return true;
   }
 
-  const resolved = resolveRange(action.range, action.date, new Date());
+  const resolved = resolveRange(action.range, action.date, new Date(), timezone);
 
   if (!resolved) {
     await sendFn(phoneNumber, "Sorry, I couldn't understand that date.");
@@ -468,7 +494,7 @@ const handleAiList = async (action, phoneNumber, userId, sendFn) => {
 
   const lines = reminders.map(
     (reminder, index) =>
-      `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime)}`,
+      `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime, timezone)}`,
   );
 
   await sendFn(
@@ -525,9 +551,11 @@ export const handleIncomingMessage = async (
 
     const { intent } = classifyMessage(text);
 
+    const timezone = user.timezone || null;
+
     switch (intent) {
       case INTENTS.CREATE_REMINDER: {
-        const parsed = parseReminderText(text);
+        const parsed = parseReminderText(text, timezone);
         const recurrencePattern = detectRecurrence(text);
         const isRecurring = recurrencePattern !== null;
 
@@ -538,12 +566,13 @@ export const handleIncomingMessage = async (
           userId: user._id,
           isRecurring,
           recurrencePattern,
+          timezone,
         });
 
         // Send confirmation back to WhatsApp
         await sendFn(
           phoneNumber,
-          buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern),
+          buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern, timezone),
         );
 
         await markInboundMessageProcessed(record._id);
@@ -554,13 +583,13 @@ export const handleIncomingMessage = async (
       case INTENTS.LIST_REMINDERS: {
         const upcoming = await getUpcomingReminders(user._id);
 
-        await sendFn(phoneNumber, formatUpcomingReminders(upcoming));
+        await sendFn(phoneNumber, formatUpcomingReminders(upcoming, timezone));
 
         break;
       }
 
       case INTENTS.SHOW_DIGEST: {
-        const digest = await generateDigest(user._id);
+        const digest = await generateDigest(user._id, timezone);
 
         await sendFn(phoneNumber, digest);
 
@@ -629,7 +658,7 @@ export const handleIncomingMessage = async (
         let newReminder;
 
         try {
-          newReminder = parseReminderText(parsed.remainder);
+          newReminder = parseReminderText(parsed.remainder, timezone);
         } catch {
           await sendFn(
             phoneNumber,
@@ -661,7 +690,7 @@ export const handleIncomingMessage = async (
 
         await sendFn(
           phoneNumber,
-          `Updated reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+          `Updated reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime, timezone)}`,
         );
 
         break;
@@ -691,7 +720,7 @@ export const handleIncomingMessage = async (
         let snoozeTarget;
 
         try {
-          snoozeTarget = parseReminderText(parsed.remainder);
+          snoozeTarget = parseReminderText(parsed.remainder, timezone);
         } catch {
           await sendFn(
             phoneNumber,
@@ -734,7 +763,7 @@ export const handleIncomingMessage = async (
 
         await sendFn(
           phoneNumber,
-          `Snoozed reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+          `Snoozed reminder ${parsed.number}: ${updated.task} - ${formatTime(updated.reminderTime, timezone)}`,
         );
 
         break;
@@ -799,6 +828,7 @@ export const handleIncomingMessage = async (
           phoneNumber,
           user._id,
           sendFn,
+          timezone,
         );
 
         if (followUp) {
@@ -815,12 +845,58 @@ export const handleIncomingMessage = async (
           phoneNumber,
           user._id,
           sendFn,
+          timezone,
         );
 
         if (followUp) {
           await markInboundMessageProcessed(record._id);
           return followUp;
         }
+
+        break;
+      }
+
+      case INTENTS.SET_TIMEZONE: {
+        const parsed = parseTimezoneCommand(text);
+
+        if (!parsed) {
+          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          break;
+        }
+
+        const result = await setUserTimezone(user._id, parsed.timezone);
+
+        if (!result.updated) {
+          await sendFn(
+            phoneNumber,
+            "That timezone is not valid. Use an IANA timezone such as Asia/Kolkata or America/New_York.",
+          );
+          break;
+        }
+
+        await sendFn(
+          phoneNumber,
+          `🌎 Timezone updated\n\n${result.timezone}`,
+        );
+
+        break;
+      }
+
+      case INTENTS.ENABLE_DIGEST: {
+        await setDigestEnabled(user._id, true);
+
+        await sendFn(
+          phoneNumber,
+          "☀️ Morning digest enabled for 8:00 AM local time.",
+        );
+
+        break;
+      }
+
+      case INTENTS.DISABLE_DIGEST: {
+        await setDigestEnabled(user._id, false);
+
+        await sendFn(phoneNumber, "☀️ Morning digest disabled.");
 
         break;
       }
@@ -855,7 +931,7 @@ export const handleIncomingMessage = async (
         }
 
         if (action.action === "create_reminder") {
-          const reminder = await handleAiCreate(action, phoneNumber, user._id, sendFn);
+          const reminder = await handleAiCreate(action, phoneNumber, user._id, sendFn, timezone);
 
           if (reminder) {
             await markInboundMessageProcessed(record._id);
@@ -866,7 +942,7 @@ export const handleIncomingMessage = async (
         }
 
         if (action.action === "edit_reminder") {
-          const updated = await handleAiEdit(action, phoneNumber, user._id, sendFn);
+          const updated = await handleAiEdit(action, phoneNumber, user._id, sendFn, timezone);
 
           if (updated) {
             await markInboundMessageProcessed(record._id);
@@ -877,7 +953,7 @@ export const handleIncomingMessage = async (
         }
 
         if (action.action === "delete_reminder") {
-          const cancelled = await handleAiDelete(action, phoneNumber, user._id, sendFn);
+          const cancelled = await handleAiDelete(action, phoneNumber, user._id, sendFn, timezone);
 
           if (cancelled) {
             await markInboundMessageProcessed(record._id);
@@ -888,7 +964,7 @@ export const handleIncomingMessage = async (
         }
 
         if (action.action === "list_reminders") {
-          await handleAiList(action, phoneNumber, user._id, sendFn);
+          await handleAiList(action, phoneNumber, user._id, sendFn, timezone);
           await markInboundMessageProcessed(record._id);
           break;
         }

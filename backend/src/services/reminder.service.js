@@ -1,4 +1,5 @@
 import Reminder from "../models/reminder.model.js";
+import User from "../models/user.model.js";
 import reminderQueue from "../queues/reminder.queue.js";
 import { parseReminderText } from "../utils/parser.js";
 import { normalizePhoneNumber } from "../utils/phone.js";
@@ -57,6 +58,7 @@ export const createReminder = async (data) => {
         isRecurring = false,
         recurrencePattern = null,
         recurrenceAnchorDay = null,
+        timezone = null,
     } = data;
 
     const requestedTime = new Date(reminderTime);
@@ -73,7 +75,8 @@ export const createReminder = async (data) => {
             requestedTime,
             recurrencePattern,
             new Date(),
-            anchorDay
+            anchorDay,
+            timezone,
         );
     } else if (requestedTime.getTime() <= Date.now()) {
         throw new ValidationError(
@@ -380,6 +383,11 @@ export const advanceRecurrence = async (reminder) => {
     return null;
   }
 
+  // The recurrence schedule is interpreted in the user's timezone so local
+  // wall times survive DST transitions.
+  const user = await User.findById(reminder.userId).select("timezone").lean();
+  const timezone = user?.timezone || null;
+
   if (reminder.recurrenceNextId) {
     const existing = await Reminder.findById(reminder.recurrenceNextId);
 
@@ -404,6 +412,7 @@ export const advanceRecurrence = async (reminder) => {
     reminder.reminderTime,
     reminder.recurrencePattern,
     reminder.recurrenceAnchorDay,
+    timezone,
   );
 
   let successor;

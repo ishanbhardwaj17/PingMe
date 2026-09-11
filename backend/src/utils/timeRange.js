@@ -1,6 +1,11 @@
 import { parseReminderText } from "./parser.js";
+import {
+  zonedStartOfDay,
+  zonedDateShift,
+  zonedDayParts,
+  zonedLocalTimeInstant,
+} from "./timezone.js";
 
-// Indexed to match Date.prototype.getDay() (Sunday = 0).
 const WEEKDAYS = [
   "sunday",
   "monday",
@@ -34,14 +39,9 @@ const startOfDay = (date) => {
   return d;
 };
 
-const addDays = (date, days) => {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-};
-
 /**
- * Start of the current Monday (week starts Monday), in server local time.
+ * Start of the current Monday (week starts Monday). Server-local when no
+ * timezone is given.
  */
 const startOfWeek = (date) => {
   const d = startOfDay(date);
@@ -55,57 +55,138 @@ const startOfWeek = (date) => {
 /**
  * Resolve a validated temporal intent into concrete local-day boundaries.
  *
+ * When `timezone` is provided, all boundaries are the user's local calendar
+ * days in that zone (DST-aware via Intl); otherwise server-local behavior
+ * is preserved.
+ *
  * Pure and deterministic: the clock comes from the injected `now`; no
- * MongoDB access, no global state. All boundaries use server-local calendar
- * arithmetic (setHours), never UTC, so the Asia/Kolkata +5:30 drift is
- * avoided.
+ * MongoDB access, no global state.
  *
  * @param {string} range - one of today|tomorrow|this_week|next_week|
  *   monday..sunday|date
  * @param {string|undefined} datePhrase - chrono-parseable phrase, only for
  *   range "date"
  * @param {Date|number} now - injectable clock
+ * @param {string} [timezone] - IANA timezone for local boundaries
  * @returns {{ start: Date, end: Date, label: string } | null} - null when
  *   the range is not a resolvable time range (next_reminder) or the date
  *   phrase cannot be parsed
  */
-export const resolveRange = (range, datePhrase, now) => {
+export const resolveRange = (range, datePhrase, now, timezone) => {
   const current = new Date(now);
 
   if (range === "today") {
-    const start = startOfDay(current);
+    const start = timezone
+      ? zonedStartOfDay(current, timezone)
+      : startOfDay(current);
 
-    return { start, end: addDays(start, 1), label: "today" };
+    return {
+      start,
+      end: timezone
+        ? zonedDateShift(start, 1, timezone)
+        : addDays(start, 1),
+      label: "today",
+    };
   }
 
   if (range === "tomorrow") {
-    const start = addDays(startOfDay(current), 1);
+    const base = timezone
+      ? zonedStartOfDay(current, timezone)
+      : startOfDay(current);
+    const start = timezone ? zonedDateShift(base, 1, timezone) : addDays(base, 1);
 
-    return { start, end: addDays(start, 1), label: "tomorrow" };
+    return {
+      start,
+      end: timezone ? zonedDateShift(start, 1, timezone) : addDays(start, 1),
+      label: "tomorrow",
+    };
   }
 
   if (range === "this_week") {
-    const start = startOfWeek(current);
+    const base = timezone
+      ? zonedStartOfDay(current, timezone)
+      : startOfDay(current);
 
-    return { start, end: addDays(start, 7), label: "this week" };
+    if (!timezone) {
+      const weekStart = startOfWeek(current);
+
+      return { start: weekStart, end: addDays(weekStart, 7), label: "this week" };
+    }
+
+    const weekday = zonedDayParts(current, timezone).weekday;
+    const mondayStart = zonedDateShift(base, -((weekday + 6) % 7), timezone);
+
+    return {
+      start: mondayStart,
+      end: zonedDateShift(mondayStart, 7, timezone),
+      label: "this week",
+    };
   }
 
   if (range === "next_week") {
-    const start = addDays(startOfWeek(current), 7);
+    const base = timezone
+      ? zonedStartOfDay(current, timezone)
+      : startOfDay(current);
 
-    return { start, end: addDays(start, 7), label: "next week" };
+    if (!timezone) {
+      const weekStart = addDays(startOfWeek(current), 7);
+
+      return { start: weekStart, end: addDays(weekStart, 7), label: "next week" };
+    }
+
+    const weekday = zonedDayParts(current, timezone).weekday;
+    const nextMonday = zonedDateShift(
+      base,
+      7 - ((weekday + 6) % 7),
+      timezone,
+    );
+
+    return {
+      start: nextMonday,
+      end: zonedDateShift(nextMonday, 7, timezone),
+      label: "next week",
+    };
   }
 
   if (WEEKDAYS.includes(range)) {
     const target = WEEKDAYS.indexOf(range);
-    let diff = target - current.getDay();
+
+    if (!timezone) {
+      const currentDay = current.getDay();
+      let diff = target - currentDay;
+
+      if (diff < 0) {
+        diff += 7;
+      }
+
+      if (diff === 0) {
+        const dayOver = startOfDay(current).getTime() + 24 * 3600_000;
+        const stillToday = current.getTime() < dayOver - DAY_OVER_GRACE_MS;
+
+        if (!stillToday) {
+          diff = 7;
+        }
+      }
+
+      const start = addDays(startOfDay(current), diff);
+
+      return {
+        start,
+        end: addDays(start, 1),
+        label: WEEKDAY_LABELS[range],
+      };
+    }
+
+    const base = zonedStartOfDay(current, timezone);
+    const parts = zonedDayParts(current, timezone);
+    let diff = target - parts.weekday;
 
     if (diff < 0) {
       diff += 7;
     }
 
     if (diff === 0) {
-      const dayOver = startOfDay(current).getTime() + 24 * 3600_000;
+      const dayOver = base.getTime() + 24 * 3600_000;
       const stillToday = current.getTime() < dayOver - DAY_OVER_GRACE_MS;
 
       if (!stillToday) {
@@ -113,11 +194,11 @@ export const resolveRange = (range, datePhrase, now) => {
       }
     }
 
-    const start = addDays(startOfDay(current), diff);
+    const start = zonedDateShift(base, diff, timezone);
 
     return {
       start,
-      end: addDays(start, 1),
+      end: zonedDateShift(start, 1, timezone),
       label: WEEKDAY_LABELS[range],
     };
   }
@@ -126,22 +207,40 @@ export const resolveRange = (range, datePhrase, now) => {
     let parsed;
 
     try {
-      parsed = parseReminderText(`Remind me to x ${datePhrase}`);
+      parsed = parseReminderText(`Remind me to x ${datePhrase}`, timezone);
     } catch {
       return null;
     }
 
-    const start = startOfDay(parsed.reminderTime);
+    const start = timezone
+      ? zonedStartOfDay(parsed.reminderTime, timezone)
+      : startOfDay(parsed.reminderTime);
+
+    const label = timezone
+      ? new Intl.DateTimeFormat([], {
+          timeZone: timezone,
+          month: "long",
+          day: "numeric",
+        }).format(start)
+      : start.toLocaleDateString([], {
+          month: "long",
+          day: "numeric",
+        });
 
     return {
       start,
-      end: addDays(start, 1),
-      label: start.toLocaleDateString([], {
-        month: "long",
-        day: "numeric",
-      }),
+      end: timezone
+        ? zonedDateShift(start, 1, timezone)
+        : addDays(start, 1),
+      label,
     };
   }
 
   return null;
+};
+
+const addDays = (date, days) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
 };

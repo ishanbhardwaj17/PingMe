@@ -1,5 +1,36 @@
 import User from "../models/user.model.js";
 import { normalizePhoneNumber } from "../utils/phone.js";
+import { isValidTimezone } from "../utils/timezone.js";
+
+/**
+ * Set the user's IANA timezone. The value must pass Intl validation; the
+ * stored timezone is never corrupted by an invalid value.
+ *
+ * @returns {Promise<{updated: boolean, timezone: string|null}>}
+ */
+export const setUserTimezone = async (userId, timezone) => {
+  const cleaned = timezone?.trim();
+
+  if (!isValidTimezone(cleaned)) {
+    return { updated: false, timezone: null };
+  }
+
+  await User.updateOne({ _id: userId }, { $set: { timezone: cleaned } });
+
+  return { updated: true, timezone: cleaned };
+};
+
+/**
+ * Enable or disable the user's morning digest.
+ */
+export const setDigestEnabled = async (userId, enabled) => {
+  await User.updateOne(
+    { _id: userId },
+    { $set: { digestEnabled: Boolean(enabled) } },
+  );
+
+  return Boolean(enabled);
+};
 
 /**
  * Resolve a user by canonical phone number, creating it when absent.

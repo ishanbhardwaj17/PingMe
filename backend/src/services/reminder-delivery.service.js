@@ -1,18 +1,19 @@
 import { sendWhatsAppMessage } from "./whatsapp.service.js";
 import { UnrecoverableError } from "bullmq";
 import Reminder from "../models/reminder.model.js";
+import User from "../models/user.model.js";
 import {
   formatReminderTimeLabel,
   formatRecurrenceNote,
 } from "../utils/messageFormat.js";
 
-export const buildReminderMessage = (reminder) => {
+export const buildReminderMessage = (reminder, timezone) => {
   const lines = [
     "⏰ Reminder",
     "",
     reminder.task,
     "",
-    `🕐 ${formatReminderTimeLabel(reminder.reminderTime)}`,
+    `🕐 ${formatReminderTimeLabel(reminder.reminderTime, timezone)}`,
   ];
 
   const recurrenceNote = formatRecurrenceNote(reminder.recurrencePattern);
@@ -29,10 +30,10 @@ export const buildReminderMessage = (reminder) => {
   return lines.join("\n");
 };
 
-export const sendReminder = async (reminder) => {
+export const sendReminder = async (reminder, timezone) => {
   return await sendWhatsAppMessage(
     reminder.phoneNumber,
-    buildReminderMessage(reminder),
+    buildReminderMessage(reminder, timezone),
   );
 };
 
@@ -117,7 +118,13 @@ export const deliverReminder = async (
   let result;
 
   try {
-    result = await sendFn(reminder);
+    // Resolve the user's timezone so the delivery message shows the
+    // reminder's local time in the recipient's zone.
+    const user = await User.findById(reminder.userId)
+      .select("timezone")
+      .lean();
+
+    result = await sendFn(reminder, user?.timezone || null);
   } catch (error) {
     const errorMessage = error?.message || "Unknown delivery error";
 
