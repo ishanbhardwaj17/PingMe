@@ -47,6 +47,132 @@ const formatUpcomingReminders = (reminders) => {
 };
 
 /**
+ * Execute a validated AI create_reminder action through the existing
+ * deterministic creation path.
+ *
+ * @returns {Promise<object|null>} the created reminder or null (a response
+ *   has already been sent in that case)
+ */
+const handleAiCreate = async (action, phoneNumber, userId, sendFn) => {
+  let parsed;
+
+  try {
+    parsed = parseReminderText(`Remind me to ${action.task} ${action.when}`);
+  } catch {
+    await sendFn(phoneNumber, UNKNOWN_TEXT);
+    return null;
+  }
+
+  const recurrencePattern =
+    action.recurrence === "none" ? null : action.recurrence;
+
+  const reminder = await createReminder({
+    phoneNumber,
+    task: parsed.task,
+    reminderTime: parsed.reminderTime,
+    userId,
+    isRecurring: recurrencePattern !== null,
+    recurrencePattern,
+  });
+
+  await sendFn(phoneNumber, `✅ Reminder set\n\n${parsed.task}`);
+
+  return reminder;
+};
+
+/**
+ * Execute a validated AI edit_reminder action.
+ *
+ * The model's target number is re-resolved fresh at execution time, and the
+ * targetTask echo is verified against the freshly fetched reminder before
+ * any mutation. Time is resolved exclusively by the existing chrono-based
+ * parser; the past-time and "never move earlier" guards run before
+ * updateReminder, which is the only mutation (no create, no manual BullMQ).
+ *
+ * @returns {Promise<object|null>} the updated reminder or null (a response
+ *   has already been sent in that case)
+ */
+const handleAiEdit = async (action, phoneNumber, userId, sendFn) => {
+  const selected = await getReminderByNumberForUser(userId, action.target);
+
+  if (!selected) {
+    await sendFn(
+      phoneNumber,
+      `I couldn't find that reminder.\n\n${formatUpcomingReminders(
+        await getUpcomingReminders(userId),
+      )}`,
+    );
+    return null;
+  }
+
+  if (selected.task.toLowerCase() !== action.targetTask.toLowerCase()) {
+    await sendFn(
+      phoneNumber,
+      `Which reminder did you mean?\n\n${formatUpcomingReminders(
+        await getUpcomingReminders(userId),
+      )}`,
+    );
+    return null;
+  }
+
+  const finalTask = action.task ?? selected.task;
+  let finalReminderTime = selected.reminderTime;
+
+  if (action.when) {
+    let parsed;
+
+    try {
+      parsed = parseReminderText(
+        `Remind me to ${finalTask} ${action.when}`,
+      );
+    } catch {
+      await sendFn(
+        phoneNumber,
+        "Sorry, I couldn't understand the new time.",
+      );
+      return null;
+    }
+
+    const newTime = parsed.reminderTime;
+
+    if (newTime.getTime() <= Date.now()) {
+      await sendFn(
+        phoneNumber,
+        "The new time is in the past. Please choose a future time.",
+      );
+      return null;
+    }
+
+    if (newTime.getTime() <= selected.reminderTime.getTime()) {
+      await sendFn(
+        phoneNumber,
+        "You can only move a reminder to a later time.",
+      );
+      return null;
+    }
+
+    finalReminderTime = newTime;
+  }
+
+  const updated = await updateReminder(selected._id, {
+    task: finalTask,
+    reminderTime: finalReminderTime,
+  });
+
+  if (!updated) {
+    await sendFn(phoneNumber, "This reminder can no longer be edited.");
+    return null;
+  }
+
+  await sendFn(
+    phoneNumber,
+    `Updated reminder ${action.target}: ${updated.task} - ${formatTime(updated.reminderTime)}`,
+  );
+
+  return updated;
+};
+
+/**
  * Handle an incoming WhatsApp message with durable webhook idempotency and
  * deterministic command routing.
  *
@@ -307,12 +433,13 @@ export const handleIncomingMessage = async (
         // UNKNOWN: only this path may invoke the AI interpretation layer.
         // Fail-closed: any AI failure (provider error, timeout, malformed
         // output, invalid action) yields the friendly response and no
-        // reminder or job is created.
+        // reminder or job is created or modified.
         let action;
 
         try {
           action = await aiInterpret(text, {
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            reminders: await getUpcomingReminders(user._id),
           });
         } catch (error) {
           console.error("[ai] interpretation failed:", error.message);
@@ -320,41 +447,35 @@ export const handleIncomingMessage = async (
           break;
         }
 
-        if (!action || action.action !== "create_reminder") {
+        if (!action) {
           await sendFn(phoneNumber, UNKNOWN_TEXT);
           break;
         }
 
-        let parsed;
+        if (action.action === "create_reminder") {
+          const reminder = await handleAiCreate(action, phoneNumber, user._id, sendFn);
 
-        try {
-          parsed = parseReminderText(
-            `Remind me to ${action.task} ${action.when}`,
-          );
-        } catch {
-          await sendFn(phoneNumber, UNKNOWN_TEXT);
+          if (reminder) {
+            await markInboundMessageProcessed(record._id);
+            return reminder;
+          }
+
           break;
         }
 
-        const recurrencePattern =
-          action.recurrence === "none" ? null : action.recurrence;
+        if (action.action === "edit_reminder") {
+          const updated = await handleAiEdit(action, phoneNumber, user._id, sendFn);
 
-        const reminder = await createReminder({
-          phoneNumber,
-          task: parsed.task,
-          reminderTime: parsed.reminderTime,
-          userId: user._id,
-          isRecurring: recurrencePattern !== null,
-          recurrencePattern,
-        });
+          if (updated) {
+            await markInboundMessageProcessed(record._id);
+            return updated;
+          }
 
-        // Send confirmation back to WhatsApp
-        const confirmationText = `✅ Reminder set\n\n${parsed.task}`;
-        await sendFn(phoneNumber, confirmationText);
+          break;
+        }
 
-        await markInboundMessageProcessed(record._id);
-
-        return reminder;
+        await sendFn(phoneNumber, UNKNOWN_TEXT);
+        break;
       }
     }
 
