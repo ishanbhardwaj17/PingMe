@@ -7,6 +7,7 @@ import {
   detectRecurrence,
   nextOccurrence,
   resolveFutureOccurrence,
+  cleanRecurringTask,
 } from "../utils/recurrenceParser.js";
 
 
@@ -89,6 +90,7 @@ export const createReminder = async (data) => {
     const reminder = await Reminder.create({
         ...data,
         phoneNumber: canonicalPhone,
+        task: cleanRecurringTask(data.task, recurrencePattern),
         reminderTime: effectiveTime,
         recurrenceAnchorDay: anchorDay,
     });

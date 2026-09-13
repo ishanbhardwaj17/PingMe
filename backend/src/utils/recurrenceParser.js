@@ -23,6 +23,49 @@ const WEEKDAYS = [
   "sunday",
 ];
 
+const RECURRENCE_PATTERN_WORDS = {
+  daily: "day",
+  weekly: "week",
+  monthly: "month",
+  monday: "monday",
+  tuesday: "tuesday",
+  wednesday: "wednesday",
+  thursday: "thursday",
+  friday: "friday",
+  saturday: "saturday",
+  sunday: "sunday",
+};
+
+/**
+ * Remove parser-recognized recurrence residue from the START of a parsed
+ * task ("every day  to drink water" -> "drink water"). Narrow by design:
+ * it only strips a leading "every <pattern-word>" plus an optional
+ * creation connector (to/about) at the task boundary. Task text that merely
+ * contains recurrence-like words later in the sentence ("... review the
+ * every day report") is never touched, and a "to"-initial task ("toast") is
+ * protected by a word boundary.
+ */
+export const cleanRecurringTask = (task, recurrencePattern) => {
+  if (!recurrencePattern || typeof task !== "string") {
+    return task;
+  }
+
+  const word = RECURRENCE_PATTERN_WORDS[recurrencePattern];
+
+  if (!word) {
+    return task;
+  }
+
+  const regex = new RegExp(
+    `^every(?:\\s+${word})?(?:\\s+(?:to|about)\\b)?\\s*`,
+    "i",
+  );
+
+  const cleaned = task.replace(regex, "").trim();
+
+  return cleaned || task.trim();
+};
+
 export const isValidRecurrencePattern = (pattern) =>
   pattern === null || RECURRENCE_PATTERNS.includes(pattern);
 

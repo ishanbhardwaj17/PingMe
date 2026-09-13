@@ -3,6 +3,16 @@ import { classifyMessage } from "../services/commandRouter.service.js";
 
 const router = express.Router();
 
+// Legacy/test surface: not required by the WhatsApp product flow.
+// Default-disabled unless ENABLE_LEGACY_API=true.
+router.use((req, res, next) => {
+  if (process.env.ENABLE_LEGACY_API !== "true") {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  next();
+});
+
 router.post("/", (req, res) => {
   try {
     const { phoneNumber, message } = req.body;

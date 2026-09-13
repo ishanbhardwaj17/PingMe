@@ -99,7 +99,12 @@ const handleAiCreate = async (action, phoneNumber, userId, sendFn, timezone) => 
 
   await sendFn(
     phoneNumber,
-    buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern, timezone),
+    buildConfirmation(
+      reminder.task,
+      reminder.reminderTime,
+      recurrencePattern,
+      timezone,
+    ),
   );
 
   return reminder;
@@ -446,6 +451,48 @@ const handleAiDelete = async (action, phoneNumber, userId, sendFn, timezone) => 
 };
 
 /**
+ * Format and send a temporal-range reminder list ("Reminders for today:"
+ * style), shared by the AI temporal action and the deterministic today
+ * query. Resolves the range in the user's timezone.
+ */
+const sendRangeList = async (
+  phoneNumber,
+  userId,
+  timezone,
+  sendFn,
+  range,
+  datePhrase,
+) => {
+  const resolved = resolveRange(range, datePhrase, new Date(), timezone);
+
+  if (!resolved) {
+    await sendFn(phoneNumber, "Sorry, I couldn't understand that date.");
+    return;
+  }
+
+  const reminders = await getRemindersInTimeRange(
+    userId,
+    resolved.start,
+    resolved.end,
+  );
+
+  if (reminders.length === 0) {
+    await sendFn(phoneNumber, `No reminders for ${resolved.label}. 🎉`);
+    return;
+  }
+
+  const lines = reminders.map(
+    (reminder, index) =>
+      `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime, timezone)}`,
+  );
+
+  await sendFn(
+    phoneNumber,
+    `Reminders for ${resolved.label}:\n\n${lines.join("\n")}`,
+  );
+};
+
+/**
  * Execute a validated AI list_reminders action.
  *
  * Read-only: the AI expresses only the temporal intent; the server resolves
@@ -474,32 +521,13 @@ const handleAiList = async (action, phoneNumber, userId, sendFn, timezone) => {
     return true;
   }
 
-  const resolved = resolveRange(action.range, action.date, new Date(), timezone);
-
-  if (!resolved) {
-    await sendFn(phoneNumber, "Sorry, I couldn't understand that date.");
-    return true;
-  }
-
-  const reminders = await getRemindersInTimeRange(
-    userId,
-    resolved.start,
-    resolved.end,
-  );
-
-  if (reminders.length === 0) {
-    await sendFn(phoneNumber, `No reminders for ${resolved.label}. 🎉`);
-    return true;
-  }
-
-  const lines = reminders.map(
-    (reminder, index) =>
-      `${index + 1}. ${reminder.task} - ${formatTime(reminder.reminderTime, timezone)}`,
-  );
-
-  await sendFn(
+  await sendRangeList(
     phoneNumber,
-    `Reminders for ${resolved.label}:\n\n${lines.join("\n")}`,
+    userId,
+    timezone,
+    sendFn,
+    action.range,
+    action.date,
   );
 
   return true;
@@ -572,7 +600,12 @@ export const handleIncomingMessage = async (
         // Send confirmation back to WhatsApp
         await sendFn(
           phoneNumber,
-          buildConfirmation(parsed.task, reminder.reminderTime, recurrencePattern, timezone),
+          buildConfirmation(
+            reminder.task,
+            reminder.reminderTime,
+            recurrencePattern,
+            timezone,
+          ),
         );
 
         await markInboundMessageProcessed(record._id);
@@ -584,6 +617,19 @@ export const handleIncomingMessage = async (
         const upcoming = await getUpcomingReminders(user._id);
 
         await sendFn(phoneNumber, formatUpcomingReminders(upcoming, timezone));
+
+        break;
+      }
+
+      case INTENTS.LIST_TODAY: {
+        await sendRangeList(
+          phoneNumber,
+          user._id,
+          timezone,
+          sendFn,
+          "today",
+          undefined,
+        );
 
         break;
       }
@@ -675,10 +721,12 @@ export const handleIncomingMessage = async (
           break;
         }
 
-        const updated = await updateReminder(selected._id, {
-          task: newReminder.task,
-          reminderTime: newReminder.reminderTime,
-        });
+const updated = await updateReminder(selected._id, {
+        // A time-only edit ("edit reminder 1 to tomorrow at 5 PM") parses to
+        // an empty task: preserve the existing task instead of erasing it.
+        task: newReminder.task || selected.task,
+        reminderTime: newReminder.reminderTime,
+      });
 
         if (!updated) {
           await sendFn(
@@ -876,7 +924,7 @@ export const handleIncomingMessage = async (
 
         await sendFn(
           phoneNumber,
-          `🌎 Timezone updated\n\n${result.timezone}`,
+          `🌎 Timezone updated\n\n${result.timezone}\n\nExisting reminders keep their scheduled times; future reminders use your new timezone.`,
         );
 
         break;

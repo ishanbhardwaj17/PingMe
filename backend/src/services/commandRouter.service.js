@@ -1,6 +1,7 @@
 const INTENTS = {
   CREATE_REMINDER: "CREATE_REMINDER",
   LIST_REMINDERS: "LIST_REMINDERS",
+  LIST_TODAY: "LIST_TODAY",
   SHOW_DIGEST: "SHOW_DIGEST",
   DELETE_REMINDER: "DELETE_REMINDER",
   EDIT_REMINDER: "EDIT_REMINDER",
@@ -134,9 +135,17 @@ export const classifyMessage = (text) => {
 
   if (
     /\b(?:show|list)\s+(?:my\s+)?reminders\b/.test(normalized) ||
-    /\bmy reminders\b/.test(normalized)
+    /\bmy reminders\b/.test(normalized) ||
+    /^what reminders do i have\??$/.test(normalized)
   ) {
     return { intent: INTENTS.LIST_REMINDERS };
+  }
+
+  if (
+    /^what do i have today\??$/.test(normalized) ||
+    /^what('?s| is) (?:on|up|scheduled|happening) today\??$/.test(normalized)
+  ) {
+    return { intent: INTENTS.LIST_TODAY };
   }
 
   if (
